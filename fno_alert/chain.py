@@ -88,15 +88,31 @@ def _iv_near(ivs: pd.DataFrame, target: float, opt: str, tol: float) -> float:
     return float(side.at[i, "iv"])
 
 
+STRIKE_BAND = 0.25   # ignore strikes more than 25% away (same band as the history files)
+
+
 def snapshot(options: pd.DataFrame, futures: pd.DataFrame, trade_date: dt.date,
              spot: float | None = None, min_dte: int = MIN_DTE) -> dict:
-    """Summarise one stock's derivatives activity on `trade_date`."""
+    """Summarise one stock's derivatives activity on `trade_date`.
+
+    Totals use the two nearest expiries and strikes within +-25% of the
+    near-month futures price, so live chains and history files agree.
+    Volumes are in contracts, OI in shares.
+    """
     out: dict = {}
     options = options.copy()
     futures = futures.copy()
 
-    # ---- totals over the two nearest expiries (robust to monthly rollover;
-    # the far month is tiny and the live scanner only fetches two chains) ----
+    out["fut_oi"] = float(futures["oi"].sum())
+    out["fut_chg_oi"] = float(futures["chg_oi"].sum())
+    out["fut_vol"] = float(futures["volume"].sum())
+    fut_sorted = futures[futures["expiry"] >= trade_date].sort_values("expiry")
+    near = fut_sorted[fut_sorted["close"].notna()]
+    out["fut_close"] = float(near["close"].iloc[0]) if len(near) else math.nan
+    ref = out["fut_close"] if out["fut_close"] == out["fut_close"] else (spot or math.nan)
+    if ref == ref and ref:
+        options = options[(options["strike"] / ref - 1).abs() <= STRIKE_BAND]
+
     live_exps = sorted(e for e in options["expiry"].unique() if e >= trade_date)[:2]
     near2 = options[options["expiry"].isin(live_exps)]
     ce = near2[near2["opt"] == "CE"]
@@ -107,9 +123,6 @@ def snapshot(options: pd.DataFrame, futures: pd.DataFrame, trade_date: dt.date,
     out["pe_chg_oi"] = float(pe["chg_oi"].sum())
     out["ce_vol"] = float(ce["volume"].sum())
     out["pe_vol"] = float(pe["volume"].sum())
-    out["fut_oi"] = float(futures["oi"].sum())
-    out["fut_chg_oi"] = float(futures["chg_oi"].sum())
-    out["fut_vol"] = float(futures["volume"].sum())
 
     expiries = list(futures["expiry"]) + list(options["expiry"])
     focus = pick_focus_expiry(expiries, trade_date, min_dte)
@@ -118,11 +131,6 @@ def snapshot(options: pd.DataFrame, futures: pd.DataFrame, trade_date: dt.date,
         return out
     out["dte"] = (focus - trade_date).days
     T = _year_frac(trade_date, focus)
-
-    # Near-month futures close is the price we compare everything against.
-    fut_sorted = futures[futures["expiry"] >= trade_date].sort_values("expiry")
-    near = fut_sorted[fut_sorted["close"].notna()]
-    out["fut_close"] = float(near["close"].iloc[0]) if len(near) else math.nan
 
     f_row = futures[(futures["expiry"] == focus) & futures["close"].notna()]
     if len(f_row):
@@ -139,8 +147,7 @@ def snapshot(options: pd.DataFrame, futures: pd.DataFrame, trade_date: dt.date,
     if chain.empty:
         return out
     ivs = _iv_at(chain, F, T)
-    atm_iv = _atm_iv(ivs, F)
-    out["atm_iv"] = atm_iv
+    out["atm_iv"] = _atm_iv(ivs, F)
     out["put_iv_95"] = _iv_near(ivs, 0.95 * F, "PE", 0.03 * F)
     out["call_iv_105"] = _iv_near(ivs, 1.05 * F, "CE", 0.03 * F)
     out["skew"] = out["put_iv_95"] - out["call_iv_105"]
@@ -150,17 +157,13 @@ def snapshot(options: pd.DataFrame, futures: pd.DataFrame, trade_date: dt.date,
     k_atm = float(strikes[np.argmin(np.abs(strikes - F))])
     out["atm_strike"] = k_atm
     atm = chain[(chain["strike"] == k_atm) & (chain["volume"] > 0) & chain["close"].notna()]
-    if set(atm["opt"]) == {"CE", "PE"}:
-        out["straddle_pct"] = float(atm["close"].sum()) / F
-    else:
-        out["straddle_pct"] = math.nan
+    out["straddle_pct"] = float(atm["close"].sum()) / F if set(atm["opt"]) == {"CE", "PE"} else math.nan
 
     agg = chain.pivot_table(index="strike", columns="opt", values=["oi", "chg_oi"], aggfunc="sum", fill_value=0)
     k = agg.index.to_numpy(dtype=float)
-    ce_oi = agg[("oi", "CE")].to_numpy(float) if ("oi", "CE") in agg else np.zeros(len(k))
-    pe_oi = agg[("oi", "PE")].to_numpy(float) if ("oi", "PE") in agg else np.zeros(len(k))
-    ce_chg = agg[("chg_oi", "CE")].to_numpy(float) if ("chg_oi", "CE") in agg else np.zeros(len(k))
-    pe_chg = agg[("chg_oi", "PE")].to_numpy(float) if ("chg_oi", "PE") in agg else np.zeros(len(k))
+    def col(name, opt):
+        return agg[(name, opt)].to_numpy(float) if (name, opt) in agg else np.zeros(len(k))
+    ce_oi, pe_oi, ce_chg, pe_chg = col("oi", "CE"), col("oi", "PE"), col("chg_oi", "CE"), col("chg_oi", "PE")
 
     out["max_pain"] = max_pain(k, ce_oi, pe_oi)
     above, below = k >= F, k <= F

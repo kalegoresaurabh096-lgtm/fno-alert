@@ -3,6 +3,7 @@
   build-data   raw downloads (data/raw) -> research tables (data/processed)
   backtest     walk-forward backtest + report (reports/)
   train        backtest, then fit the final model on all history (models/)
+  seed-state   start the live scanner's history from data/processed
   scan         live scan via Upstox and email alerts
   test-email   send a sample email to check SMTP settings
 """
@@ -65,19 +66,56 @@ def cmd_backtest(a, cfg):
 
 
 def cmd_train(a, cfg):
+    import numpy as np
+    import pandas as pd
     from . import model, strategy
     p, res = _backtest(a, cfg)
     p = p.dropna(subset=["big"])
     fitted = model.fit(p, res["features"])
     os.makedirs(a.models, exist_ok=True)
     fitted.save(os.path.join(a.models, "model.pkl"))
+    # The final model is refit on all data, so its probabilities are not on the
+    # walk-forward models' scale. Map the threshold by alert rate on the holdout.
+    oos = pd.read_parquet(os.path.join(a.reports, "oos_predictions.parquet"))
+    hold_start = pd.Timestamp(res["holdout"].split("..")[0])
+    hold = oos[pd.to_datetime(oos["date"]) >= hold_start]
+    p_final = fitted.predict(hold)["p_big"].to_numpy()
+    rate = res["alert_rate_holdout"]
+    th_final = float(np.quantile(p_final, 1 - rate)) if 0 < rate < 1 else res["threshold"]
     h = res["holdout_at_threshold"]
-    meta = {"threshold": res["threshold"], "features": res["features"], "trained_on": f"{res['start']}..{res['end']}",
-            "holdout": res["holdout"], "holdout_hit_rate": h.get("hit_rate"), "base_rate_holdout": res["base_rate_holdout"],
-            "holdout_lift": h.get("lift"), "direction_conf": res["direction_conf"],
-            "trade_rules": strategy.TradeRules(dir_conf=res["direction_conf"]).as_dict()}
+    meta = {"threshold": th_final, "threshold_walkforward": res["threshold"], "signal_rate": rate,
+            "features": res["features"], "trained_on": f"{res['start']}..{res['end']}",
+            "holdout": res["holdout"], "holdout_hit_rate": h.get("hit_rate"),
+            "base_rate_holdout": res["base_rate_holdout"], "holdout_lift": h.get("lift"),
+            "direction_conf": res["direction_conf"],
+            "trade_rules": res.get("trade_rules", strategy.TradeRules(dir_conf=res["direction_conf"]).as_dict())}
     json.dump(meta, open(os.path.join(a.models, "model_meta.json"), "w"), indent=2, default=str)
-    print("Saved model to", a.models)
+    print(f"Saved model to {a.models} (alert threshold {th_final:.3f})")
+
+
+def cmd_seed_state(a, cfg):
+    """Start the live scanner's memory from the research tables, so features that
+    need months of history (IV rank, 60-day z-scores) work from day one."""
+    import pandas as pd
+    from .scan import State
+    st = State(a.state)
+    snap = pd.read_parquet(os.path.join(a.processed, "opt_daily.parquet"))
+    st.save_table("opt_daily.parquet", snap)
+    eq = pd.read_parquet(os.path.join(a.processed, "ohlcv.parquet"))
+    for sym, g in eq.groupby("symbol"):
+        st.save_px(sym, g.set_index("date").sort_index())
+    fc_path = os.path.join(a.processed, "fut_contracts.parquet")
+    if os.path.exists(fc_path):
+        fc = pd.read_parquet(fc_path)
+        fc = fc[fc["date"] >= fc["date"].max() - pd.Timedelta(days=120)]
+        st.save_table("fut_contracts.csv", fc[["date", "symbol", "expiry", "close", "oi", "volume"]])
+    mk = os.path.join(a.processed, "market.parquet")
+    if os.path.exists(mk):
+        m = pd.read_parquet(mk)
+        st.save_table("market.csv", m.reset_index().rename(columns={"index": "date"}))
+    lots = snap[["date", "symbol", "lot"]].dropna()
+    st.save_table("lots.csv", lots[lots["date"] >= lots["date"].max() - pd.Timedelta(days=30)])
+    print("Seeded", a.state, "from", a.processed)
 
 
 def cmd_scan(a, cfg):
@@ -119,11 +157,14 @@ def main(argv=None):
     s.add_argument("--state", default="state")
     s.add_argument("--models", default="models")
     s.add_argument("--save-html", help="also write the email HTML to this file")
+    s = sub.add_parser("seed-state")
+    s.add_argument("--processed", default="data/processed")
+    s.add_argument("--state", default="state")
     sub.add_parser("test-email")
     a = ap.parse_args(argv)
     cfg = load_config(a.config)
     {"build-data": cmd_build, "backtest": cmd_backtest, "train": cmd_train, "scan": cmd_scan,
-     "test-email": cmd_test_email}[a.cmd](a, cfg)
+     "test-email": cmd_test_email, "seed-state": cmd_seed_state}[a.cmd](a, cfg)
 
 
 if __name__ == "__main__":

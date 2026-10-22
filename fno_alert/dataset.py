@@ -33,71 +33,70 @@ def read_fo_month(path: str) -> pd.DataFrame:
     return normalise_units(df)
 
 
-def _share_multiple(x: pd.Series, lot: pd.Series) -> float:
-    ok = (x > 0) & (lot > 1)
-    if ok.sum() < 50:
+def _gcd_lot(oi: pd.Series) -> float:
+    """Lot size = greatest common divisor of OI values (OI is a whole number of lots, in shares)."""
+    v = oi[(oi > 0)].round().astype("int64").to_numpy()
+    if len(v) < 3:
         return np.nan
-    return float(((x[ok] % lot[ok]) == 0).mean())
+    g = int(np.gcd.reduce(v))
+    return float(g) if g > 0 else np.nan
 
 
 def normalise_units(df: pd.DataFrame) -> pd.DataFrame:
-    """Volume -> contracts, OI -> shares, consistently across both file formats."""
+    """Both bhavcopy formats already report volume in contracts and OI in shares
+    (checked against real files), so nothing is rescaled. Only the lot size is
+    filled in for old-format files, which do not carry it."""
     df = df.copy()
-    # Old files have no lot size; estimate it from futures turnover (Rs lakh).
     old = df["fmt"] == "old"
     if old.any():
+        lots = df[old].groupby(["date", "symbol"])["oi"].apply(_gcd_lot)
+        # Cross-check with the turnover estimate; fall back to it when the GCD looks off.
         fut = old & (df["inst"] == "FUT") & (df["volume"] > 0)
         px = df.loc[fut, ["open", "high", "low", "close"]].mean(axis=1)
-        est = df.loc[fut, "turnover"] * 1e5 / (df.loc[fut, "volume"] * px)
-        lots = est.groupby([df.loc[fut, "date"], df.loc[fut, "symbol"]]).median()
+        est = (df.loc[fut, "turnover"] * 1e5 / (df.loc[fut, "volume"] * px)).groupby(
+            [df.loc[fut, "date"], df.loc[fut, "symbol"]]).median()
+        est = est.reindex(lots.index)
+        bad = lots.isna() | ((est.notna()) & ((lots / est - 1).abs() > 0.25))
+        lots = lots.where(~bad, est.round())
         key = pd.MultiIndex.from_arrays([df.loc[old, "date"], df.loc[old, "symbol"]])
         df.loc[old, "lot"] = lots.reindex(key).to_numpy()
-    # Per day and format, decide whether volume / OI are in shares or contracts.
-    for (d, fmt), idx in df.groupby(["date", "fmt"]).groups.items():
-        g = df.loc[idx]
-        vm = _share_multiple(g["volume"], g["lot"])
-        if vm == vm and vm > 0.97:      # volume reported in shares
-            df.loc[idx, "volume"] = g["volume"] / g["lot"]
-        om = _share_multiple(g["oi"], g["lot"])
-        if om == om and om < 0.5:       # OI reported in contracts
-            df.loc[idx, "oi"] = g["oi"] * g["lot"]
-            df.loc[idx, "chg_oi"] = g["chg_oi"] * g["lot"]
     df.loc[~(df["volume"] > 0), "close"] = np.nan
     df.loc[df["close"] <= 0, "close"] = np.nan
     return df
 
 
-def _snapshots_for_month(path: str) -> tuple[list[dict], pd.DataFrame]:
+def _snapshots_for_month(path: str):
     df = read_fo_month(path)
     rows = []
     contracts = []
+    futs = df[df["inst"] == "FUT"][["date", "symbol", "expiry", "close", "oi", "chg_oi", "volume", "lot"]]
     for d, day in df.groupby("date"):
         for sym, g in day.groupby("symbol"):
             fut = g[g["inst"] == "FUT"][["expiry", "close", "oi", "chg_oi", "volume"]]
             opt = g[g["inst"] != "FUT"].rename(columns={"inst": "opt"})
+            opt.loc[~(opt["volume"] > 0), "open"] = np.nan
             snap = chain.snapshot(opt[["expiry", "strike", "opt", "close", "oi", "chg_oi", "volume"]], fut, d)
             snap.update({"date": d, "symbol": sym, "lot": g["lot"].median()})
             rows.append(snap)
             # Keep near-the-money prices of the two nearest expiries for trade tests.
-            F = snap.get("F")
-            if F and F == F:
-                exps = sorted(e for e in opt["expiry"].unique() if e >= d)[:2]
-                near = opt[opt["expiry"].isin(exps) & ((opt["strike"] / F - 1).abs() <= 0.15)]
-                contracts.append(near[["date", "symbol", "expiry", "strike", "opt", "close", "settle",
-                                       "volume", "oi"]])
+            exps = sorted(e for e in opt["expiry"].unique() if e >= d)[:2]
+            near = opt[opt["expiry"].isin(exps)]
+            contracts.append(near[["date", "symbol", "expiry", "strike", "opt", "open", "close", "settle",
+                                   "volume", "oi"]])
     con = pd.concat(contracts) if contracts else pd.DataFrame()
-    return rows, con
+    return rows, con, futs
 
 
 def build_derivatives(raw_dir: str, out_dir: str, workers: int = 4) -> None:
     files = sorted(glob.glob(os.path.join(raw_dir, "fo", "fo_*.csv.gz")))
     if not files:
         raise SystemExit(f"No F&O files in {raw_dir}/fo")
-    rows, cons = [], []
+    rows, cons, futs = [], [], []
     with ProcessPoolExecutor(workers) as ex:
-        for i, (r, c) in enumerate(ex.map(_snapshots_for_month, files)):
+        for i, (r, c, f) in enumerate(ex.map(_snapshots_for_month, files)):
             rows.extend(r)
             cons.append(c)
+            futs.append(f)
             print(f"  derivatives: {i + 1}/{len(files)} months", flush=True)
     snap = pd.DataFrame(rows)
     snap["date"] = pd.to_datetime(snap["date"])
@@ -109,6 +108,10 @@ def build_derivatives(raw_dir: str, out_dir: str, workers: int = 4) -> None:
     con["symbol"] = con["symbol"].astype("category")
     con["opt"] = con["opt"].astype("category")
     con.to_parquet(os.path.join(out_dir, "fo_contracts.parquet"), index=False)
+    fu = pd.concat(futs, ignore_index=True)
+    fu["date"] = pd.to_datetime(fu["date"])
+    fu["expiry"] = pd.to_datetime(fu["expiry"])
+    fu.to_parquet(os.path.join(out_dir, "fut_contracts.parquet"), index=False)
 
 
 def build_equity(raw_dir: str, out_dir: str, symbols: set[str]) -> pd.DataFrame:
@@ -134,13 +137,13 @@ def build_equity(raw_dir: str, out_dir: str, symbols: set[str]) -> pd.DataFrame:
             cum = factor[::-1].cumprod()[::-1].shift(-1).fillna(1.0)
             adj = pd.DataFrame({
                 "open": g["open"] * cum, "high": g["high"] * cum, "low": g["low"] * cum,
-                "close": g["close"] * cum, "volume": g["volume"] / cum,
+                "close": g["close"] * cum, "volume": g["volume"] / cum, "close_raw": g["close"],
                 "corp_action": (factor != 1.0).astype(int),
             })
             adj["symbol"] = sym
             out.append(adj.reset_index())
     eq = pd.concat(out, ignore_index=True) if out else pd.DataFrame(
-        columns=["date", "open", "high", "low", "close", "volume", "corp_action", "symbol"])
+        columns=["date", "open", "high", "low", "close", "volume", "corp_action", "symbol", "close_raw"])
     eq["source"] = "nse"
     # Fill from Yahoo where NSE CM data is missing.
     ydir = os.path.join(raw_dir, "yahoo")
@@ -153,7 +156,9 @@ def build_equity(raw_dir: str, out_dir: str, symbols: set[str]) -> pd.DataFrame:
             y["symbol"] = sym
             y["corp_action"] = 0
             y["source"] = "yahoo"
-            extra.append(y[["date", "open", "high", "low", "close", "volume", "corp_action", "symbol", "source"]])
+            y["close_raw"] = np.nan   # Yahoo closes are split-adjusted
+            extra.append(y[["date", "open", "high", "low", "close", "volume", "corp_action", "symbol", "source",
+                            "close_raw"]])
     if extra:
         eq = pd.concat([eq] + extra, ignore_index=True)
     eq = eq.sort_values(["symbol", "date"])

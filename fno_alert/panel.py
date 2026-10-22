@@ -17,7 +17,11 @@ def stock_frame(px: pd.DataFrame, snap: pd.DataFrame | None, mkt_f: pd.DataFrame
     parts = [tech]
     if snap is not None and len(snap):
         snap = snap[~snap.index.duplicated(keep="last")]
-        parts.append(feat.option_features(snap, tech))
+        # Align to the stock's trading days so shift(5) always means 5 sessions,
+        # even when a day's snapshot is missing.
+        snap = snap.reindex(tech.index)
+        raw = px["close_raw"] if "close_raw" in px else None
+        parts.append(feat.option_features(snap, tech, raw))
         keep = ["F", "max_pain", "call_wall", "put_wall", "atm_strike", "focus_expiry", "lot", "fut_close"]
         parts.append(snap[[k for k in keep if k in snap.columns]])
     df = pd.concat(parts, axis=1)
@@ -33,7 +37,7 @@ def stock_frame(px: pd.DataFrame, snap: pd.DataFrame | None, mkt_f: pd.DataFrame
         df = df.join(mkt_f, how="left")
     df = df.join(feat.event_features(df.index, results), how="left")
     if with_labels:
-        df = df.join(lab.forward_labels(df["close"], df["sigma60"]))
+        df = df.join(lab.forward_labels(df["close"], px["open"].reindex(df.index), df["sigma60"]))
     return df
 
 
@@ -58,7 +62,7 @@ def build_panel(processed: str = "data/processed", min_turnover_cr: float = 10.0
         df = stock_frame(px, s, mkt_f, ev_by.get(sym))
         df["symbol"] = sym
         # Universe = days on which the stock actually had F&O contracts trading.
-        df["in_fno"] = df.index.isin(s.index)
+        df["in_fno"] = df.index.isin(s.index[s["F"].notna()] if "F" in s else s.index)
         frames.append(df)
     panel = pd.concat(frames)
     panel.index.name = "date"

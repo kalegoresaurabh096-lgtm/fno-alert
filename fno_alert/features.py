@@ -97,11 +97,16 @@ def technical_features(px: pd.DataFrame) -> pd.DataFrame:
     return f
 
 
-def option_features(snap: pd.DataFrame, tech: pd.DataFrame) -> pd.DataFrame:
-    """snap: one stock's daily derivatives snapshots, index=date (see chain.snapshot).
-    tech: the same stock's technical features (for realised vol and returns)."""
+def option_features(snap: pd.DataFrame, tech: pd.DataFrame, close_raw: pd.Series | None = None) -> pd.DataFrame:
+    """snap: one stock's daily derivatives snapshots, index=date (see chain.snapshot),
+    already aligned to the stock's trading days (missing days = NaN rows).
+    tech: the same stock's technical features (for realised vol and returns).
+    close_raw: unadjusted cash close, for the futures basis."""
     snap = snap.sort_index()
     f = pd.DataFrame(index=snap.index)
+    # Volumes compared over time in shares, so lot-size revisions do not look like spikes.
+    lot = snap["lot"].ffill().bfill() if "lot" in snap else pd.Series(1.0, index=snap.index)
+    lot = lot.fillna(1.0)
     iv = snap["atm_iv"]
     f["atm_iv"] = iv
     f["iv_rank"] = ind.rolling_pct_rank(iv, TRADING_DAYS, 60)
@@ -121,14 +126,14 @@ def option_features(snap: pd.DataFrame, tech: pd.DataFrame) -> pd.DataFrame:
     f["fut_oi_chg"] = snap["fut_chg_oi"] / prev_fut_oi.replace(0, np.nan)
     f["fut_oi_chg5"] = snap["fut_oi"] / snap["fut_oi"].shift(5) - 1
     f["fut_oi_chg_z"] = (f["fut_oi_chg"] - f["fut_oi_chg"].rolling(60, min_periods=30).mean()) / f["fut_oi_chg"].rolling(60, min_periods=30).std()
-    fv = snap["fut_vol"]
-    f["fut_rvol"] = fv / fv.rolling(20).mean().shift(1)
+    fv = snap["fut_vol"] * lot
+    f["fut_rvol"] = fv / fv.rolling(20, min_periods=10).mean().shift(1)
 
     opt_oi = snap["ce_oi"] + snap["pe_oi"]
     prev_opt_oi = opt_oi - (snap["ce_chg_oi"] + snap["pe_chg_oi"])
     f["opt_oi_chg"] = (snap["ce_chg_oi"] + snap["pe_chg_oi"]) / prev_opt_oi.replace(0, np.nan)
-    ov = snap["ce_vol"] + snap["pe_vol"]
-    f["opt_rvol"] = ov / ov.rolling(20).mean().shift(1)
+    ov = (snap["ce_vol"] + snap["pe_vol"]) * lot
+    f["opt_rvol"] = ov / ov.rolling(20, min_periods=10).mean().shift(1)
     f["opt_vol_oi"] = ov / opt_oi.replace(0, np.nan)
     f["pcr_oi"] = snap["pe_oi"] / snap["ce_oi"].replace(0, np.nan)
     f["pcr_vol"] = snap["pe_vol"] / snap["ce_vol"].replace(0, np.nan)
@@ -151,7 +156,10 @@ def option_features(snap: pd.DataFrame, tech: pd.DataFrame) -> pd.DataFrame:
     f["buildup_short"] = ((ret < 0) & (oi > 0)).astype(float) * oi.abs()
     f["short_covering"] = ((ret > 0) & (oi < 0)).astype(float) * oi.abs()
     f["long_unwinding"] = ((ret < 0) & (oi < 0)).astype(float) * oi.abs()
-    f["fut_basis"] = snap["fut_close"] / tech["close"].reindex(f.index) - 1
+    if close_raw is not None and close_raw.notna().any():
+        f["fut_basis"] = snap["fut_close"] / close_raw.reindex(f.index) - 1
+    else:
+        f["fut_basis"] = np.nan
     return f
 
 
@@ -199,7 +207,11 @@ def event_features(dates: pd.DatetimeIndex, results) -> pd.DataFrame:
         r = results.dropna(subset=["date"])
         dvals = dates.values.astype("datetime64[ns]")
         for m, a in zip(pd.to_datetime(r["date"]), pd.to_datetime(r["announced"])):
-            known_from = a.normalize() if pd.notna(a) else m - pd.Timedelta(days=7)
+            if pd.notna(a):
+                # Announced after the close -> usable from the next day.
+                known_from = a.normalize() + pd.Timedelta(days=1 if (a.hour, a.minute) >= (15, 30) else 0)
+            else:
+                known_from = m - pd.Timedelta(days=7)
             known_from = min(known_from, m)
             mask = (dvals >= np.datetime64(known_from)) & (dvals <= np.datetime64(m))
             dd = (np.datetime64(m) - dvals[mask]).astype("timedelta64[D]").astype(float)

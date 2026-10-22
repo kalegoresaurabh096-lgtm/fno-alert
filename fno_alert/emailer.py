@@ -38,10 +38,15 @@ def render(alerts: list[dict], meta: dict, run_label: str) -> tuple[str, str, st
     base = meta.get("base_rate")
     hit = meta.get("hit_rate")
     stats_line = ""
+    if meta.get("direction_enabled") is False:
+        stats_line_dir = (" The backtest found no reliable edge in predicting the direction, so trade ideas "
+                          "are direction-neutral (straddles).")
+    else:
+        stats_line_dir = ""
     if hit and base:
         stats_line = (f"In the backtest holdout ({meta.get('holdout_period', '')}), stocks flagged at this "
                       f"threshold made a big move within 5 trading days {hit:.0%} of the time, "
-                      f"vs {base:.0%} for a random F&O stock-day.")
+                      f"vs {base:.0%} for a random F&O stock-day." + stats_line_dir)
     text = [subject, "", stats_line, ""]
     cards = []
     for a in alerts:

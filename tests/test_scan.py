@@ -101,3 +101,18 @@ def test_scan_end_to_end(tmp_path, monkeypatch):
     assert a["action"] in ("BUY CE", "BUY PE", "SELL PE", "SELL CE", "BUY CE + BUY PE", "NO TRADE")
     assert a["reasons"] and abs(a["atm_iv"] - 0.45) < 0.02
     assert out_html.exists() and "CCC" in out_html.read_text()
+
+
+def test_repeat_runs_and_cooldown(tmp_path, monkeypatch):
+    from fno_alert import emailer
+    sent = []
+    monkeypatch.setattr(scan, "Upstox", FakeUpstox)
+    monkeypatch.setattr(emailer, "send", lambda *a, **k: sent.append(a[0]))
+    cfg = {"alerts": {"fallback_rule_threshold": 0.2}, "backtest": {"min_turnover_cr": 0}}
+    st = str(tmp_path / "state")
+    for mode in ("intraday", "eod", "eod", "intraday"):
+        scan.run(cfg, mode=mode, dry_run=False, state_dir=st, model_dir=str(tmp_path / "none"))
+    # intraday + first EOD are sent; the repeated EOD and the later intraday are suppressed
+    assert len(sent) == 2
+    log = scan.State(st).load_table("alerts_log.csv")
+    assert set(log["kind"]) == {"intraday", "eod"}

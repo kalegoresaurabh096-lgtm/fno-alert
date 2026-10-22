@@ -34,7 +34,9 @@ TARGETS = {"big": lambda d: d["big"], "up": lambda d: ((d["big"] == 1) & (d["dir
            "dn": lambda d: ((d["big"] == 1) & (d["dir"] < 0)).astype(float)}
 
 
-def feature_list(panel: pd.DataFrame, groups=("tech", "opts", "market", "events")) -> list[str]:
+def feature_list(panel: pd.DataFrame, groups=("tech", "opts", "market")) -> list[str]:
+    """Event features are left out by default: there is no live results calendar
+    source within broker terms yet, and a feature must exist live to be used."""
     cols = []
     for g, fl in (("tech", TECH), ("opts", OPTS), ("market", MARKET), ("events", EVENTS)):
         if g in groups:

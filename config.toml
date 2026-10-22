@@ -5,6 +5,7 @@
 exclude = []
 
 [alerts]
+intraday = true             # also send early (not backtested) intraday estimates
 max_per_email = 10          # most alerts in one email
 cooldown_hours = 20         # do not repeat the same stock + action within this window
 # Used only until a model has been trained (python -m fno_alert train):

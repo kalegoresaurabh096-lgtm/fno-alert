@@ -35,7 +35,7 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
 HOSTS = ("https://nsearchives.nseindia.com", "https://archives.nseindia.com")
 UDIFF_START = dt.date(2024, 7, 8)
-STRIKE_BAND = 0.25
+STRIKE_BAND = 0.35
 FO_FIELDS = ["date", "symbol", "inst", "expiry", "strike", "open", "high", "low", "close",
              "settle", "volume", "oi", "chg_oi", "lot", "underlying", "turnover", "fmt"]
 CM_FIELDS = ["date", "symbol", "series", "open", "high", "low", "close", "prev_close",

@@ -72,7 +72,7 @@ def generate(raw_dir: str, n_symbols: int = 30, start=dt.date(2022, 1, 3), n_day
         vol = (rng.lognormal(13, 0.3, n_days) * (1 + 1.5 * storm + 0.6 * warn)).astype(int)
         iv_base = base_vol * np.sqrt(252) * 1.1
         iv = iv_base * (1 + 0.8 * warn + 1.2 * storm) * np.exp(rng.normal(0, 0.05, n_days))
-        fut_oi = lot * 2000.0
+        fut_oi = {}
         for i, day in enumerate(days):
             key = day.strftime("%Y%m")
             prev = close[i - 1] if i else close[i]
@@ -87,11 +87,15 @@ def generate(raw_dir: str, n_symbols: int = 30, start=dt.date(2022, 1, 3), n_day
             for e in live:
                 T = max((e - day).days, 0.5) / 365
                 F = close[i] * np.exp(0.065 * T)
-                d_oi = lot * round(rng.normal(0.01 + 0.04 * warn[i], 0.02) * fut_oi / lot)
-                fut_oi = max(fut_oi + d_oi, lot * 100.0)
+                base = lot * 2000.0
+                cur = fut_oi.get(e, lot * 200.0)
+                d_oi = lot * round((rng.normal(0.01 + 0.04 * warn[i], 0.02) * cur + 0.05 * (base - cur)) / lot)
+                new_oi = max(cur + d_oi, lot * 100.0)
+                d_oi = new_oi - cur if e in fut_oi else new_oi
+                fut_oi[e] = new_oi
                 fo_rows.setdefault(key, []).append(
                     [day.isoformat(), sym, "FUT", e.isoformat(), "", F, F, F, F, F,
-                     int(vol[i] / lot / 3), fut_oi, d_oi, lot, close[i], "", "udiff"])
+                     int(vol[i] / lot / 3), new_oi, d_oi, lot, close[i], "", "udiff"])
                 for k in range(-10, 11):
                     K = atm + k * step
                     if K <= 0:

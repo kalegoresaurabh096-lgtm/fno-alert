@@ -64,13 +64,98 @@ def test_divergence_is_causal():
         assert (full[:n].to_numpy() == part.to_numpy()).all()
 
 
-def test_labels():
+def test_labels_start_at_next_open():
     c = pd.Series([100, 101, 99, 100, 108, 100, 100, 100, 100, 100, 100.0])
+    o = c.shift(1).fillna(100.0)
     s = pd.Series(0.005, index=c.index)  # tiny sigma -> threshold = 4% floor
-    lab = labels.forward_labels(c, s, horizon=5)
+    lab = labels.forward_labels(c, o, s, horizon=5)
     assert lab["big"].iloc[0] == 1 and lab["dir"].iloc[0] == 1
     assert lab["big"].iloc[5] == 0
     assert lab["big"].iloc[-5:].isna().all()   # unknown future
+    # An overnight gap you could not trade is not a hit.
+    c2 = pd.Series([100, 110, 110, 110, 110, 110, 110.0])
+    o2 = pd.Series([100, 110, 110, 110, 110, 110, 110.0])
+    lab2 = labels.forward_labels(c2, o2, pd.Series(0.005, index=c2.index), horizon=5)
+    assert lab2["big"].iloc[0] == 0 and abs(lab2["gap_next"].iloc[0] - 0.10) < 1e-9
+
+
+def test_alert_cooldown():
+    from fno_alert import alerting
+    d = pd.bdate_range("2024-01-01", periods=12)
+    df = pd.DataFrame({"date": d, "symbol": "X", "p_big": [0.5] * 12})
+    out = alerting.emit(df, 0.3)
+    assert list(out["date"]) == [d[0], d[6]]       # repeats suppressed for 5 sessions
+    df.loc[2, "p_big"] = 0.65                     # big enough jump re-alerts
+    assert d[2] in set(alerting.emit(df, 0.3)["date"])
+
+
+def test_real_crash_not_treated_as_split():
+    c = np.r_[np.full(30, 1000.0), np.full(30, 760.0)]
+    px = ohlc_from_close(c)
+    px.iloc[30, px.columns.get_loc("open")] = 800.0     # -20% gap, -24% day
+    adj = prices.adjust_splits(px)
+    assert adj["corp_action"].sum() == 0
+    assert adj["close"].iloc[29] == 1000.0
+
+
+def test_split_needs_lot_change_when_lots_known():
+    c = np.r_[np.full(30, 1000.0), np.full(30, 500.0)]
+    px = ohlc_from_close(c)
+    px.iloc[30, px.columns.get_loc("open")] = 500.0
+    same_lot = pd.Series(250.0, index=px.index)
+    assert prices.adjust_splits(px, same_lot)["corp_action"].sum() == 0
+    doubled = pd.Series(np.r_[np.full(30, 250.0), np.full(30, 500.0)], index=px.index)
+    assert prices.adjust_splits(px, doubled)["corp_action"].sum() == 1
+
+
+def test_old_format_lot_from_gcd():
+    from fno_alert import dataset
+    d = dt.date(2023, 5, 2)
+    rows = [{"date": d, "symbol": "X", "inst": "FUT", "expiry": d, "strike": np.nan, "open": 100, "high": 101,
+             "low": 99, "close": 100, "settle": 100, "volume": 10, "oi": 250 * 400, "chg_oi": 250 * 3,
+             "lot": np.nan, "underlying": np.nan, "turnover": 10 * 250 * 100 / 1e5, "fmt": "old"}]
+    for k, m in ((100, 7), (110, 13), (90, 22)):
+        rows.append({**rows[0], "inst": "CE", "strike": k, "oi": 250 * m, "turnover": np.nan})
+    out = dataset.normalise_units(pd.DataFrame(rows))
+    assert (out["lot"] == 250).all()
+    assert out["oi"].iloc[0] == 250 * 400          # OI already in shares: unchanged
+
+
+def test_futures_totals_have_no_expiry_artifact():
+    from fno_alert.scan import fut_daily_from_contracts
+    d = pd.bdate_range("2026-09-21", periods=6)
+    e1, e2, e3 = pd.Timestamp("2026-09-24"), pd.Timestamp("2026-10-27"), pd.Timestamp("2026-11-24")
+    rows = []
+    for i, day in enumerate(d):
+        for e, oi in ((e1, 1000), (e2, 2000 + 10 * i), (e3, 100)):
+            if day <= e:
+                rows.append({"date": day, "expiry": e, "oi": float(oi), "volume": 1.0, "close": 1.0})
+    tot = fut_daily_from_contracts(pd.DataFrame(rows)).set_index("date")
+    # The day after the near contract expires, the change must not show -1000.
+    assert tot.loc[d[4], "fut_chg_oi"] == 10
+
+
+def test_trade_enters_next_open_and_sell_pnl_sign():
+    from fno_alert import strategy
+    days = pd.bdate_range("2026-09-01", periods=12)
+    exp = pd.Timestamp("2026-10-27")
+    rows = []
+    for i, day in enumerate(days):
+        for K in (90.0, 100.0, 110.0):
+            for opt in ("CE", "PE"):
+                px = 10.0 if i <= 1 else 4.0       # premium collapses after entry
+                rows.append({"date": day, "symbol": "X", "expiry": exp, "strike": K, "opt": opt,
+                             "open": 9.0 if i == 1 else px, "close": px, "settle": px, "volume": 5, "oi": 100})
+    book = strategy.ContractBook(pd.DataFrame(rows))
+    al = pd.DataFrame([{"date": days[0], "symbol": "X", "action": "SELL PE", "F": 100.0, "atm_iv": 0.2, "lot": 100}])
+    r = strategy.TradeRules(slippage=0.0, min_slippage=0.0, brokerage=0, exch_fee=0, sebi_fee=0, stamp_buy=0, stt_sell=0)
+    tr = strategy.simulate(al, book, days, r)
+    t = tr.iloc[0]
+    assert t["entry_date"] == days[1] and t["status"] == "ok"
+    assert abs(t["pnl_per_share"] - (9.0 - 4.0)) < 1e-9          # sold at next open 9, bought back at 4
+    al2 = al.assign(action="BUY CE")
+    t2 = strategy.simulate(al2, book, days, r).iloc[0]
+    assert abs(t2["pnl_per_share"] - (4.0 - 9.0)) < 1e-9
 
 
 def test_split_adjustment():
