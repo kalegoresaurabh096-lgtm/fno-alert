@@ -17,6 +17,7 @@ import traceback
 import numpy as np
 import pandas as pd
 
+from . import dashlog
 from . import alerting, chain, emailer, explain, features as feat, panel, prices, strategy
 from .model import Fitted
 from .upstox import IST, Upstox, chain_to_frames
@@ -372,6 +373,13 @@ def run(config: dict, mode: str = "auto", dry_run: bool = False, only: list[str]
         print(f"{len(alerts)} alert(s): " + ", ".join(f"{a['symbol']} {a['action']}" for a in alerts))
     else:
         print("No stock above the alert threshold.")
+    if not dry_run:
+        try:
+            last = mkt_today.iloc[-1] if len(mkt_today) else {}
+            dashlog.record(st.root, now, mode, df, alerts, threshold, "model" if fitted is not None else "rules",
+                           len(results), errors, ux.calls, last.get("nifty"), last.get("vix"))
+        except Exception as e:  # the dashboard log must never block alerts
+            print(f"Dashboard log not written: {type(e).__name__}: {e}")
     return alerts
 
 

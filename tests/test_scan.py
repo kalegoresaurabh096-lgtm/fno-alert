@@ -116,3 +116,18 @@ def test_repeat_runs_and_cooldown(tmp_path, monkeypatch):
     assert len(sent) == 2
     log = scan.State(st).load_table("alerts_log.csv")
     assert set(log["kind"]) == {"intraday", "eod"}
+
+
+def test_dashboard_log(tmp_path, monkeypatch):
+    from fno_alert import emailer
+    monkeypatch.setattr(scan, "Upstox", FakeUpstox)
+    monkeypatch.setattr(emailer, "send", lambda *a, **k: None)
+    cfg = {"alerts": {"fallback_rule_threshold": 0.2}, "backtest": {"min_turnover_cr": 0}}
+    st = tmp_path / "state"
+    scan.run(cfg, mode="eod", dry_run=False, state_dir=str(st), model_dir=str(tmp_path / "none"))
+    scan.run(cfg, mode="eod", dry_run=False, state_dir=str(st), model_dir=str(tmp_path / "none"))
+    scores = pd.read_csv(st / "dash" / "scores.csv")
+    runs = pd.read_csv(st / "dash" / "runs.csv")
+    assert len(runs) == 2 and set(scores["symbol"]) == {"AAA", "BBB", "CCC"}
+    assert scores.loc[scores["symbol"] == "CCC", "alerted"].iloc[0] == 1
+    assert scores["score"].between(0, 1).all()
