@@ -17,6 +17,7 @@ from . import explain
 from . import features as feat
 
 KEEP_SESSIONS = 20
+TOP_REASONS = 25
 SCORE_COLS = ["run_time", "date", "mode", "symbol", "score", "p_up", "p_dn", "points", "close", "ret1",
               "atm_iv", "iv_rank", "iv_hv", "pcr_oi", "fut_oi_chg", "rvol", "squeeze_days", "buildup",
               "alerted", "action", "reasons"]
@@ -60,6 +61,9 @@ def record(root: str, now: dt.datetime, mode: str, df: pd.DataFrame, alerts: lis
             "reasons": " | ".join((a["reasons"] if a else why)[:3]),
         })
     scores = pd.DataFrame(rows, columns=SCORE_COLS)
+    # Reasons only for the top of the list (and every alert), to keep the file small.
+    top_n = scores["score"].rank(ascending=False, method="first") > TOP_REASONS
+    scores.loc[top_n & (scores["alerted"] == 0), "reasons"] = ""
     dates = sorted(set(pd.read_csv(os.path.join(root, "dash", "scores.csv"))["date"])
                    if os.path.exists(os.path.join(root, "dash", "scores.csv")) else []) + [day]
     dates = sorted(set(dates))
