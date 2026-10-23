@@ -98,8 +98,13 @@ def main():
     a = ap.parse_args()
     t0 = time.time()
     deadline = t0 + a.max_minutes * 60
-    # Leave room under Upstox's 2000-requests-per-30-minutes limit for the live scans.
-    ux = Upstox(limiter=RateLimiter(per_sec=5, per_min=60, per_30min=1450), cache_dir=os.path.join(a.out, ".cache"))
+    # Upstox allows 2000 requests per 30 minutes. Leave room for the live scans
+    # during market hours (about 04:15-11:15 UTC on weekdays); use nearly all of it otherwise.
+    now = dt.datetime.utcnow()
+    market = now.weekday() < 5 and dt.time(4, 15) <= now.time() <= dt.time(11, 15)
+    per30 = 1400 if market else 1950
+    ux = Upstox(limiter=RateLimiter(per_sec=5, per_min=per30 // 25, per_30min=per30),
+                cache_dir=os.path.join(a.out, ".cache"))
     today = dt.datetime.now(IST).date()
     uni = ux.fno_universe(ux.instruments(), today)
     if a.symbols:
