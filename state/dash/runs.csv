@@ -1,0 +1,2 @@
+run_time,date,mode,model,threshold,scanned,errors,alerts,api_calls,near_threshold,top_symbol,top_score,nifty,vix
+2026-10-23 13:09,2026-10-23,intraday,rules,0.45,213,0,0,427,0,HAVELLS,0.34,22400.85,16.76
