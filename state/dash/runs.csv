@@ -1,3 +1,4 @@
 run_time,date,mode,model,threshold,scanned,errors,alerts,api_calls,near_threshold,top_symbol,top_score,nifty,vix
 2026-10-23 13:09,2026-10-23,intraday,rules,0.45,213,0,0,427,0,HAVELLS,0.34,22400.85,16.76
 2026-10-23 15:15,2026-10-23,intraday,rules,0.45,213,0,0,427,0,NAM-INDIA,0.34,22516.4,16.92
+2026-10-23 16:11,2026-10-23,eod,rules,0.45,213,0,0,427,0,NAM-INDIA,0.34,22600.0,16.86
