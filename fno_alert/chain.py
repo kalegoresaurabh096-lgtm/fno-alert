@@ -88,7 +88,7 @@ def _iv_near(ivs: pd.DataFrame, target: float, opt: str, tol: float) -> float:
     return float(side.at[i, "iv"])
 
 
-STRIKE_BAND = 0.25   # ignore strikes more than 25% away (same band as the history files)
+STRIKE_BAND = 0.15   # ignore strikes more than 15% away (same band as the Upstox history download)
 
 
 def snapshot(options: pd.DataFrame, futures: pd.DataFrame, trade_date: dt.date,

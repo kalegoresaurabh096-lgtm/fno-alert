@@ -17,7 +17,7 @@ from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import pandas as pd
 
-from . import chain
+from . import chain, prices
 
 FO_DTYPES = {"symbol": "string", "inst": "string", "fmt": "string"}
 
@@ -145,6 +145,25 @@ def build_equity(raw_dir: str, out_dir: str, symbols: set[str]) -> pd.DataFrame:
     eq = pd.concat(out, ignore_index=True) if out else pd.DataFrame(
         columns=["date", "open", "high", "low", "close", "volume", "corp_action", "symbol", "close_raw"])
     eq["source"] = "nse"
+    # Upstox prices (not split-adjusted): adjust with the strict split detector,
+    # confirmed by the F&O lot-size change on the same day.
+    udir = os.path.join(raw_dir, "upstox_eq")
+    lots_by = {}
+    snap_p = os.path.join(out_dir, "opt_daily.parquet")
+    if os.path.isdir(udir) and os.path.exists(snap_p):
+        sn = pd.read_parquet(snap_p, columns=["date", "symbol", "lot"]).dropna()
+        lots_by = {k: g.set_index("date")["lot"].sort_index() for k, g in sn.groupby("symbol")}
+    up = []
+    for sym in sorted(symbols - set(eq["symbol"].unique())):
+        p = os.path.join(udir, f"{sym}.csv")
+        if not os.path.exists(p):
+            continue
+        u = pd.read_csv(p, parse_dates=["date"]).dropna(subset=["close"]).set_index("date").sort_index()
+        u = prices.adjust_splits(u[["open", "high", "low", "close", "volume"]], lots_by.get(sym))
+        u["symbol"], u["source"] = sym, "upstox"
+        up.append(u.reset_index())
+    if up:
+        eq = pd.concat([eq] + up, ignore_index=True)
     # Fill from Yahoo where NSE CM data is missing.
     ydir = os.path.join(raw_dir, "yahoo")
     have = set(eq["symbol"].unique())
@@ -198,8 +217,12 @@ def build_events(raw_dir: str, out_dir: str) -> pd.DataFrame:
     return ev
 
 
-def build_all(raw_dir: str = "data/raw", out_dir: str = "data/processed", workers: int = 4) -> None:
+def build_all(raw_dir: str = "data/raw", out_dir: str = "data/processed", workers: int = 4,
+              upstox_dir: str | None = None) -> None:
     os.makedirs(out_dir, exist_ok=True)
+    if upstox_dir:
+        print("Converting Upstox downloads ...", flush=True)
+        upstox_to_raw(upstox_dir, raw_dir)
     print("Building derivatives tables ...", flush=True)
     build_derivatives(raw_dir, out_dir, workers)
     syms = set(pd.read_parquet(os.path.join(out_dir, "opt_daily.parquet"), columns=["symbol"])["symbol"])
@@ -208,3 +231,94 @@ def build_all(raw_dir: str = "data/raw", out_dir: str = "data/processed", worker
     build_market(raw_dir, out_dir)
     build_events(raw_dir, out_dir)
     print("Done:", out_dir)
+
+
+# --------------------------------------------------------------------------- Upstox
+FO_FIELDS = ["date", "symbol", "inst", "expiry", "strike", "open", "high", "low", "close",
+             "settle", "volume", "oi", "chg_oi", "lot", "underlying", "turnover", "fmt"]
+
+
+def _fill_contract_days(df: pd.DataFrame, cal: pd.DatetimeIndex) -> pd.DataFrame:
+    """Upstox only returns a candle on days a contract traded. Bhavcopies list every
+    open contract every day, so carry OI forward over untraded days (volume 0, no price)
+    between a contract's first and last candle, then add the daily OI change."""
+    if df.empty:
+        return df
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"])
+    df["cid"] = df["inst"].astype(str) + "|" + df["strike"].fillna(0).astype(str)
+    out = []
+    for cid, g in df.groupby("cid", sort=False):
+        g = g.set_index("date").sort_index()
+        # OI stays open until expiry even when a contract stops trading.
+        last = max(g.index.max(), pd.Timestamp(g["expiry"].iloc[0]))
+        days = cal[(cal >= g.index.min()) & (cal <= last)]
+        g = g.reindex(days.union(g.index))
+        for c in ("symbol", "inst", "expiry", "strike", "lot", "cid"):
+            g[c] = g[c].ffill().bfill()
+        g["volume"] = g["volume"].fillna(0.0)
+        g["oi"] = g["oi"].ffill()
+        g["chg_oi"] = g["oi"].diff().fillna(g["oi"])
+        out.append(g)
+    res = pd.concat(out).rename_axis("date").reset_index()
+    return res.drop(columns="cid")
+
+
+def upstox_to_raw(upstox_dir: str, raw_dir: str) -> None:
+    """Turn data/upstox (scripts/upstox_backfill.py) into the raw layout build_all reads:
+    raw/fo/fo_YYYYMM.csv.gz, raw/upstox_eq/<SYM>.csv and raw/yahoo/NIFTY.csv, INDIAVIX.csv."""
+    import shutil
+    fo_dir = os.path.join(raw_dir, "fo")
+    if os.path.isdir(fo_dir):
+        shutil.rmtree(fo_dir)
+    os.makedirs(fo_dir)
+    os.makedirs(os.path.join(raw_dir, "yahoo"), exist_ok=True)
+    os.makedirs(os.path.join(raw_dir, "upstox_eq"), exist_ok=True)
+    for name, out in (("nifty", "NIFTY"), ("vix", "INDIAVIX")):
+        p = os.path.join(upstox_dir, "index", f"{name}.csv")
+        if os.path.exists(p):
+            shutil.copy(p, os.path.join(raw_dir, "yahoo", f"{out}.csv"))
+    for p in glob.glob(os.path.join(upstox_dir, "eq", "*.csv")):
+        shutil.copy(p, os.path.join(raw_dir, "upstox_eq", os.path.basename(p)))
+    cal_src = os.path.join(upstox_dir, "index", "nifty.csv")
+    cal = pd.DatetimeIndex(sorted(pd.read_csv(cal_src, parse_dates=["date"])["date"].unique()))
+    files = sorted(glob.glob(os.path.join(upstox_dir, "fo", "*", "*.parquet")))
+    import gzip
+    buckets: dict[str, list] = {}
+    months = set()
+
+    def flush():
+        for m, parts in buckets.items():
+            g = pd.concat(parts, ignore_index=True)
+            g["date"] = g["date"].dt.date
+            path = os.path.join(fo_dir, f"fo_{m}.csv.gz")
+            new_file = not os.path.exists(path)
+            with gzip.open(path, "at", newline="") as fh:
+                g.to_csv(fh, index=False, header=new_file)
+            months.add(m)
+        buckets.clear()
+
+    # Only keep days on which both of the two nearest expiries were downloaded:
+    # from a month before the first expired expiry to a month before the last one.
+    span = {}
+    for f in files:
+        sym, e = os.path.basename(os.path.dirname(f)), pd.Timestamp(os.path.basename(f)[:10])
+        lo, hi = span.get(sym, (e, e))
+        span[sym] = (min(lo, e), max(hi, e))
+    for i, f in enumerate(files):
+        df = _fill_contract_days(pd.read_parquet(f), cal)
+        if df.empty:
+            continue
+        lo, hi = span[os.path.basename(os.path.dirname(f))]
+        df = df[(df["date"] >= lo - pd.Timedelta(days=31)) & (df["date"] <= hi - pd.Timedelta(days=35))]
+        if df.empty:
+            continue
+        df["underlying"], df["turnover"], df["fmt"] = np.nan, np.nan, "upstox"
+        for m, g in df.groupby(df["date"].dt.strftime("%Y%m")):
+            buckets.setdefault(m, []).append(g[FO_FIELDS])
+        if (i + 1) % 200 == 0:
+            flush()
+            print(f"  upstox contracts: {i + 1}/{len(files)} files", flush=True)
+    flush()
+    buckets = months
+    print(f"  wrote {len(buckets)} monthly F&O files from {len(files)} stock-expiries", flush=True)

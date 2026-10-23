@@ -39,7 +39,7 @@ def load_dotenv(path: str = ".env"):
 
 def cmd_build(a, cfg):
     from . import dataset
-    dataset.build_all(a.raw, a.processed, a.workers)
+    dataset.build_all(a.raw, a.processed, a.workers, a.upstox)
 
 
 def _backtest(a, cfg):
@@ -100,6 +100,15 @@ def cmd_seed_state(a, cfg):
     from .scan import State
     st = State(a.state)
     snap = pd.read_parquet(os.path.join(a.processed, "opt_daily.parquet"))
+    if a.options_only:
+        # Add history behind what the live scanner has saved; keep its own rows.
+        live = st.load_table("opt_daily.parquet")
+        if len(live):
+            live["date"] = pd.to_datetime(live["date"])
+            snap = pd.concat([snap, live], ignore_index=True).drop_duplicates(["symbol", "date"], keep="last")
+        st.save_table("opt_daily.parquet", snap.sort_values(["symbol", "date"]))
+        print("Added option history to", a.state)
+        return
     st.save_table("opt_daily.parquet", snap)
     eq = pd.read_parquet(os.path.join(a.processed, "ohlcv.parquet"))
     for sym, g in eq.groupby("symbol"):
@@ -150,6 +159,7 @@ def main(argv=None):
         s.add_argument("--reports", default="reports")
         s.add_argument("--models", default="models")
         s.add_argument("--workers", type=int, default=os.cpu_count() or 2)
+        s.add_argument("--upstox", help="also convert scripts/upstox_backfill.py output from this folder")
     s = sub.add_parser("scan")
     s.add_argument("--mode", choices=["auto", "intraday", "eod"], default="auto")
     s.add_argument("--dry-run", action="store_true", help="print alerts, do not email or save state")
@@ -159,6 +169,8 @@ def main(argv=None):
     s.add_argument("--save-html", help="also write the email HTML to this file")
     s = sub.add_parser("seed-state")
     s.add_argument("--processed", default="data/processed")
+    s.add_argument("--options-only", action="store_true",
+                   help="only merge option snapshots into the scanner's history, keep its prices")
     s.add_argument("--state", default="state")
     sub.add_parser("test-email")
     a = ap.parse_args(argv)

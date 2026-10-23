@@ -1,0 +1,66 @@
+name: Download Upstox history
+
+# Pulls 2 years of expired F&O contracts from Upstox (needs Upstox Plus) into the
+# history-data branch, an hour at a time, and restarts itself until done.
+# When everything is downloaded it starts "Train model".
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "37 */6 * * *"   # safety net in case a run stops early
+
+concurrency:
+  group: upstox-backfill
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Open the history-data branch at data/upstox
+        run: |
+          git config --global user.name "fno-alert-bot"
+          git config --global user.email "fno-alert-bot@users.noreply.github.com"
+          if git fetch --depth 1 origin history-data; then
+            git worktree add data/upstox FETCH_HEAD
+            git -C data/upstox switch -c history-data
+          else
+            git worktree add --orphan -b history-data data/upstox
+          fi
+          echo ".cache/" > data/upstox/.gitignore
+      - name: Download (5 rounds of up to an hour, saved after each)
+        env:
+          UPSTOX_ACCESS_TOKEN: ${{ secrets.UPSTOX_ACCESS_TOKEN }}
+        run: |
+          for i in 1 2 3 4 5; do
+            python scripts/upstox_backfill.py --out data/upstox --max-minutes 60
+            cd data/upstox
+            git add -A
+            git diff --cached --quiet || git commit -q -m "Upstox history $(date -u +%F_%H%M)"
+            git push -q origin history-data
+            cd ../..
+            if python -c "import json,sys; sys.exit(0 if json.load(open('data/upstox/status.json'))['left']==0 else 1)"; then
+              echo "All history downloaded."; break
+            fi
+          done
+      - name: Continue, or start training when done
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if python -c "import json,sys; sys.exit(0 if json.load(open('data/upstox/status.json'))['left']==0 else 1)"; then
+            gh workflow run train.yml --ref main
+          else
+            gh workflow run backfill.yml --ref main
+          fi
