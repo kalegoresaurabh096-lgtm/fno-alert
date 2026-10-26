@@ -1,0 +1,25 @@
+name: Send test email
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Send a sample alert email
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          ALERT_TO: ${{ secrets.ALERT_TO }}
+        run: python -m fno_alert test-email
