@@ -108,6 +108,8 @@ def test_repeat_runs_and_cooldown(tmp_path, monkeypatch):
     sent = []
     monkeypatch.setattr(scan, "Upstox", FakeUpstox)
     monkeypatch.setattr(emailer, "send", lambda *a, **k: sent.append(a[0]))
+    monkeypatch.setenv("SMTP_USER", "x@example.com")
+    monkeypatch.setenv("SMTP_PASSWORD", "x")
     cfg = {"alerts": {"fallback_rule_threshold": 0.2}, "backtest": {"min_turnover_cr": 0}}
     st = str(tmp_path / "state")
     for mode in ("intraday", "eod", "eod", "intraday"):
@@ -131,3 +133,17 @@ def test_dashboard_log(tmp_path, monkeypatch):
     assert len(runs) == 2 and set(scores["symbol"]) == {"AAA", "BBB", "CCC"}
     assert scores.loc[scores["symbol"] == "CCC", "alerted"].iloc[0] == 1
     assert scores["score"].between(0, 1).all()
+
+
+def test_no_email_settings(tmp_path, monkeypatch):
+    from fno_alert import emailer
+    sent = []
+    monkeypatch.setattr(scan, "Upstox", FakeUpstox)
+    monkeypatch.setattr(emailer, "send", lambda *a, **k: sent.append(a[0]))
+    monkeypatch.delenv("SMTP_USER", raising=False)
+    monkeypatch.delenv("SMTP_PASSWORD", raising=False)
+    cfg = {"alerts": {"fallback_rule_threshold": 0.2}, "backtest": {"min_turnover_cr": 0}}
+    st = str(tmp_path / "state")
+    alerts = scan.run(cfg, mode="eod", dry_run=False, state_dir=st, model_dir=str(tmp_path / "none"))
+    assert alerts and not sent
+    assert len(scan.State(st).load_table("alerts_log.csv")) == len(alerts)

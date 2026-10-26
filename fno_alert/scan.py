@@ -364,8 +364,11 @@ def run(config: dict, mode: str = "auto", dry_run: bool = False, only: list[str]
             open(out_html, "w").write(body)
         if dry_run:
             print(text)
+        elif not (os.environ.get("SMTP_USER") and os.environ.get("SMTP_PASSWORD")):
+            print("Email not set up (SMTP_USER/SMTP_PASSWORD missing), so this alert is only in the log and dashboard.")
         else:
             emailer.send(subject, text, body)
+        if not dry_run:
             new_log = pd.DataFrame([{"time": now.replace(tzinfo=None), "date": pd.Timestamp(today),
                                      "kind": mode, "symbol": a["symbol"], "action": a["action"],
                                      "p_big": a["p_big"]} for a in alerts])
