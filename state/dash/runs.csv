@@ -7,3 +7,4 @@ run_time,date,mode,model,threshold,scanned,errors,alerts,api_calls,near_threshol
 2026-10-26 15:26,2026-10-26,intraday,rules,0.45,213,0,0,427,2,ATHERENERG,0.41,22717.05,17.13
 2026-10-26 16:20,2026-10-26,eod,rules,0.45,213,0,0,427,2,ATHERENERG,0.41,22753.2,17.16
 2026-10-27 10:55,2026-10-27,intraday,rules,0.45,213,0,0,427,1,LAURUSLABS,0.37,22781.7,16.93
+2026-10-27 13:12,2026-10-27,intraday,rules,0.45,213,0,0,427,1,LAURUSLABS,0.37,22712.8,16.76
