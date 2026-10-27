@@ -9,3 +9,4 @@ run_time,date,mode,model,threshold,scanned,errors,alerts,api_calls,near_threshol
 2026-10-27 10:55,2026-10-27,intraday,rules,0.45,213,0,0,427,1,LAURUSLABS,0.37,22781.7,16.93
 2026-10-27 13:12,2026-10-27,intraday,rules,0.45,213,0,0,427,1,LAURUSLABS,0.37,22712.8,16.76
 2026-10-27 15:21,2026-10-27,intraday,rules,0.45,213,0,0,427,1,LAURUSLABS,0.37,22760.75,16.33
+2026-10-27 16:17,2026-10-27,eod,rules,0.45,213,0,0,427,1,LAURUSLABS,0.37,22749.75,16.4
