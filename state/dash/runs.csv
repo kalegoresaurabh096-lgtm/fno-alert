@@ -12,3 +12,4 @@ run_time,date,mode,model,threshold,scanned,errors,alerts,api_calls,near_threshol
 2026-10-27 16:17,2026-10-27,eod,rules,0.45,213,0,0,427,1,LAURUSLABS,0.37,22749.75,16.4
 2026-10-28 11:02,2026-10-28,intraday,rules,0.45,218,0,0,460,0,KAYNES,0.28,22601.65,16.61
 2026-10-28 13:23,2026-10-28,intraday,rules,0.45,218,0,0,454,0,PGEL,0.36,22704.8,16.36
+2026-10-28 15:28,2026-10-28,intraday,rules,0.45,218,0,0,454,1,NAUKRI,0.4,22698.85,16.24
