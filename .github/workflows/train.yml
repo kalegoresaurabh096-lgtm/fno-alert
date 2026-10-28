@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: train
+  group: fno-scan   # same group as the scan, so they never push state at the same time
   cancel-in-progress: false
 
 permissions:
@@ -40,6 +40,15 @@ jobs:
         run: |
           git config user.name "fno-alert-bot"
           git config user.email "fno-alert-bot@users.noreply.github.com"
-          git add models/ reports/ state/
-          git diff --cached --quiet || git commit -q -m "Train model on Upstox history $(date -u +%F)"
-          for i in 1 2 3; do git pull -q --rebase origin main && git push -q origin main && break; sleep 5; done
+          mkdir -p /tmp/out && cp -r models reports /tmp/out/
+          ok=0
+          for i in 1 2 3 4 5; do
+            git fetch -q origin main && git reset -q --hard origin/main
+            cp -r /tmp/out/models /tmp/out/reports .
+            python -m fno_alert seed-state --options-only
+            git add models/ reports/ state/
+            git diff --cached --quiet || git commit -q -m "Train model on Upstox history $(date -u +%F)"
+            if git push -q origin main; then ok=1; break; fi
+            sleep 10
+          done
+          test "$ok" = 1
