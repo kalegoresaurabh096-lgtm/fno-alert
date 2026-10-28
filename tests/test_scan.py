@@ -147,3 +147,20 @@ def test_no_email_settings(tmp_path, monkeypatch):
     alerts = scan.run(cfg, mode="eod", dry_run=False, state_dir=st, model_dir=str(tmp_path / "none"))
     assert alerts and not sent
     assert len(scan.State(st).load_table("alerts_log.csv")) == len(alerts)
+
+
+def test_model_handles_infinite_features():
+    import numpy as np
+    import pandas as pd
+    from fno_alert import model
+    rng = np.random.default_rng(0)
+    n = 400
+    df = pd.DataFrame({"f1": rng.normal(size=n), "f2": rng.normal(size=n)})
+    df.loc[::17, "f2"] = np.inf
+    df.loc[::23, "f1"] = -np.inf
+    df["big"] = (rng.random(n) < 0.3).astype(float)
+    df["dir"] = np.where(df["big"] == 1, rng.choice([-1.0, 1.0], n), 0.0)
+    for kind in ("hgb", "logit"):
+        m = model.fit(df, ["f1", "f2"], kind)
+        p = m.predict(df)
+        assert np.isfinite(p.to_numpy()).all()

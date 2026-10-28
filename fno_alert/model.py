@@ -55,8 +55,13 @@ def make_logit():
                          LogisticRegression(C=0.05, max_iter=2000))
 
 
+def _finite(X: pd.DataFrame) -> pd.DataFrame:
+    """Ratios with a zero denominator (e.g. no call OI yet) give +/-inf; treat them as missing."""
+    return X.replace([np.inf, -np.inf], np.nan)
+
+
 def _clip(X: pd.DataFrame, lo: pd.Series, hi: pd.Series) -> pd.DataFrame:
-    return X.clip(lower=lo, upper=hi, axis=1)
+    return _finite(X).clip(lower=lo, upper=hi, axis=1)
 
 
 @dataclass
@@ -87,7 +92,7 @@ class Fitted:
 
 def fit(train: pd.DataFrame, features: list, kind: str = "hgb", seed: int = 0) -> Fitted:
     train = train.dropna(subset=["big"])
-    X = train[features].astype(float)
+    X = _finite(train[features].astype(float))
     lo, hi = X.quantile(0.005), X.quantile(0.995)
     X = _clip(X, lo, hi)
     models = {}
