@@ -1,0 +1,326 @@
+{
+  "features": [
+    "ret1",
+    "ret5",
+    "ret20",
+    "hv20",
+    "hv60",
+    "hv_ratio_10_60",
+    "ret1_z",
+    "atr_pct",
+    "atr_ratio_14_50",
+    "tr_atr",
+    "nr7",
+    "inside_day",
+    "gap",
+    "clv",
+    "bb_width",
+    "bb_width_rank",
+    "bb_pos",
+    "squeeze_on",
+    "squeeze_days",
+    "squeeze_fired",
+    "squeeze_fired_len",
+    "rvol",
+    "rvol5",
+    "dvol_cr",
+    "brk_up20",
+    "brk_dn20",
+    "brk_up55",
+    "brk_dn55",
+    "dist_hi20_atr",
+    "dist_lo20_atr",
+    "pos_52w",
+    "range20_atr",
+    "rsi",
+    "macd_hist_pct",
+    "macd_cross",
+    "rsi_div",
+    "macd_div",
+    "adx",
+    "adx_slope5",
+    "di_diff",
+    "c_ema20",
+    "c_ema50",
+    "c_ema200",
+    "ema20_slope5",
+    "atm_iv",
+    "iv_rank",
+    "iv_chg1",
+    "iv_chg5",
+    "iv_z60",
+    "iv_hv",
+    "straddle_pct",
+    "iv_move5",
+    "skew",
+    "skew_chg5",
+    "dte",
+    "fut_oi_chg",
+    "fut_oi_chg5",
+    "fut_oi_chg_z",
+    "fut_rvol",
+    "opt_oi_chg",
+    "opt_rvol",
+    "opt_vol_oi",
+    "pcr_oi",
+    "pcr_vol",
+    "pcr_chg5",
+    "pcr_z60",
+    "near_writing_bias",
+    "near_oi_chg",
+    "dist_max_pain",
+    "dist_call_wall",
+    "dist_put_wall",
+    "buildup_long",
+    "buildup_short",
+    "short_covering",
+    "long_unwinding",
+    "fut_basis",
+    "vix",
+    "vix_rank",
+    "vix_chg5",
+    "nifty_ret5",
+    "nifty_hv20"
+  ],
+  "n_rows": 88101,
+  "n_stocks": 210,
+  "start": "2024-09-30",
+  "end": "2026-08-25",
+  "validation": "2025-10-01..2026-04-09",
+  "holdout": "2026-04-20..2026-08-25",
+  "base_rate_val": 0.09588712578440385,
+  "base_rate_holdout": 0.03936407687700768,
+  "auc": {
+    "model": {
+      "validation": 0.6258139535740834,
+      "holdout": 0.6948373126030642
+    },
+    "logistic": {
+      "validation": 0.6586810043530517,
+      "holdout": 0.7083586143405475
+    },
+    "rule_points": {
+      "validation": 0.5556696276705332,
+      "holdout": 0.5941425121340995
+    },
+    "iv_rank_only": {
+      "validation": 0.6136721387348282,
+      "holdout": 0.6087662965780667
+    },
+    "bb_squeeze_only": {
+      "validation": 0.4821429887711097,
+      "holdout": 0.5443405741273623
+    }
+  },
+  "auc_by_year": {
+    "2025": 0.6539359420638761,
+    "2026": 0.6765574473796399
+  },
+  "threshold": 0.32,
+  "validation_at_threshold": {
+    "alerts": 189,
+    "alerts_per_day": 1.4765625,
+    "days_with_alert": 0.4609375,
+    "hit_rate": 0.24867724867724866,
+    "false_alarm_rate": 0.7513227513227514,
+    "lift": 2.593437300815375,
+    "recall": 0.019591496456857024,
+    "avg_max_move": 0.04383231758627426,
+    "avg_overnight_gap_missed": 0.008529022120373401
+  },
+  "holdout_at_threshold": {
+    "alerts": 24,
+    "alerts_per_day": 0.2696629213483146,
+    "days_with_alert": 0.1797752808988764,
+    "hit_rate": 0.25,
+    "false_alarm_rate": 0.75,
+    "lift": 6.350968188105117,
+    "recall": 0.008298755186721992,
+    "avg_max_move": 0.05591084872702873,
+    "avg_overnight_gap_missed": 0.011354693021883073
+  },
+  "holdout_raw_signal_days": {
+    "alerts": 41,
+    "alerts_per_day": 0.4606741573033708,
+    "days_with_alert": 0.25842696629213485,
+    "hit_rate": 0.2682926829268293,
+    "false_alarm_rate": 0.7317073170731707,
+    "lift": 6.815673177478662,
+    "recall": 0.015214384508990318,
+    "avg_max_move": 0.054349420490549846,
+    "avg_overnight_gap_missed": 0.010172634830364423
+  },
+  "alert_rate_holdout": 0.002232264387216203,
+  "rule_baseline_holdout": {
+    "threshold": 0.47,
+    "alerts": 128,
+    "alerts_per_day": 1.4382022471910112,
+    "days_with_alert": 0.651685393258427,
+    "hit_rate": 0.0546875,
+    "false_alarm_rate": 0.9453125,
+    "lift": 1.3892742911479943,
+    "recall": 0.009681881051175657,
+    "avg_max_move": 0.04255755345553659,
+    "avg_overnight_gap_missed": 0.006574286633109243
+  },
+  "hit_rate_ci": [
+    0.09090909090909091,
+    0.394722222222222
+  ],
+  "base_rate_ci": [
+    0.032958841382248014,
+    0.04696501820528184
+  ],
+  "direction_conf": 1.01,
+  "direction_validation_tests": [
+    {
+      "conf": 0.55,
+      "n": 163,
+      "accuracy": 0.44785276073619634,
+      "p_value": 0.920815551034303
+    },
+    {
+      "conf": 0.6,
+      "n": 148,
+      "accuracy": 0.4527027027027027,
+      "p_value": 0.8912772261085478
+    },
+    {
+      "conf": 0.65,
+      "n": 131,
+      "accuracy": 0.4351145038167939,
+      "p_value": 0.9422727558538702
+    },
+    {
+      "conf": 0.7,
+      "n": 107,
+      "accuracy": 0.3925233644859813,
+      "p_value": 0.9900498098727656
+    },
+    {
+      "conf": 0.75,
+      "n": 92,
+      "accuracy": 0.3804347826086957,
+      "p_value": 0.99198986260555
+    }
+  ],
+  "direction_holdout": {
+    "called": 0,
+    "note": "direction calls disabled (no proven edge on validation)"
+  },
+  "calibration_holdout": [
+    {
+      "predicted": 0.028273998460989918,
+      "actual": 0.02302049076650645,
+      "n": 11859
+    },
+    {
+      "predicted": 0.06938334962703074,
+      "actual": 0.05054740274866061,
+      "n": 4293
+    },
+    {
+      "predicted": 0.12068928861737696,
+      "actual": 0.07985074626865672,
+      "n": 1340
+    },
+    {
+      "predicted": 0.17217068609487723,
+      "actual": 0.10887096774193548,
+      "n": 496
+    },
+    {
+      "predicted": 0.23725997531224852,
+      "actual": 0.1746031746031746,
+      "n": 315
+    },
+    {
+      "predicted": 0.3356287906832288,
+      "actual": 0.25,
+      "n": 56
+    },
+    {
+      "predicted": 0.45386895685174483,
+      "actual": 0.3333333333333333,
+      "n": 6
+    },
+    {
+      "predicted": 0.5184708330820127,
+      "actual": 0.5,
+      "n": 2
+    }
+  ],
+  "trades": {
+    "validation": [
+      {
+        "action": "BUY CE + BUY PE",
+        "attempted": 49.0,
+        "trades": 46.0,
+        "not_fillable": 3.0,
+        "win_rate": 0.21739130434782608,
+        "avg_return": -0.14109453701466013,
+        "median_return": -0.16751447662414154,
+        "worst_return": -0.6396813978662941,
+        "profit_factor": 0.055655705731214714,
+        "avg_pnl_per_lot": -4650.356500042173,
+        "total_pnl_per_lot": -213916.39900193998
+      }
+    ],
+    "validation_same_stock_random_days": [
+      {
+        "action": "BUY CE + BUY PE",
+        "attempted": 147.0,
+        "trades": 133.0,
+        "not_fillable": 14.0,
+        "win_rate": 0.3082706766917293,
+        "avg_return": -0.04520738103746464,
+        "median_return": -0.09329377641216058,
+        "worst_return": -0.6186914573147553,
+        "profit_factor": 0.7714214936590917,
+        "avg_pnl_per_lot": -895.5536464586561,
+        "total_pnl_per_lot": -117317.52768608395
+      }
+    ],
+    "holdout": []
+  },
+  "trade_rules": {
+    "dir_conf": 1.01,
+    "iv_rich_rank": 0.75,
+    "iv_rich_ratio": 1.6,
+    "sell_otm_sigma": 0.6,
+    "min_sell_otm": 0.03,
+    "hold_days": 5,
+    "min_trade_dte": 12,
+    "slippage": 0.02,
+    "min_slippage": 0.15,
+    "brokerage": 20.0,
+    "exch_fee": 0.000355,
+    "sebi_fee": 1e-06,
+    "gst": 0.18,
+    "stamp_buy": 3e-05,
+    "stt_sell": 0.001,
+    "margin_frac": 0.2
+  },
+  "top_features": {
+    "hv60": 0.0732,
+    "iv_hv": 0.0207,
+    "iv_z60": 0.0154,
+    "atm_iv": 0.0123,
+    "straddle_pct": 0.0072,
+    "atr_pct": 0.0055,
+    "c_ema50": 0.0039,
+    "nifty_ret5": 0.0038,
+    "vix": 0.0024,
+    "hv_ratio_10_60": 0.0021,
+    "iv_chg5": 0.0015,
+    "pcr_z60": 0.0012,
+    "atr_ratio_14_50": 0.0009,
+    "c_ema20": 0.0008,
+    "pcr_chg5": 0.0006,
+    "bb_width": 0.0006,
+    "bb_width_rank": 0.0005,
+    "short_covering": 0.0004,
+    "vix_rank": 0.0004,
+    "ema20_slope5": 0.0003
+  }
+}
