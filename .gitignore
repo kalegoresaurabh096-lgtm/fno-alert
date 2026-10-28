@@ -6,3 +6,4 @@ data/processed/
 state/cache/
 reports/oos_predictions.parquet
 .pytest_cache/
+research/*.parquet
