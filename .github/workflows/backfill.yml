@@ -2,12 +2,13 @@ name: Download Upstox history
 
 # Pulls 2 years of expired F&O contracts from Upstox (needs Upstox Plus) into the
 # history-data branch, an hour at a time, and restarts itself until done.
-# When everything is downloaded it starts "Train model".
+# When everything is downloaded it starts "Train model". Once a week it checks for
+# newly expired contracts, and retrains only if it found any.
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "37 */6 * * *"   # safety net in case a run stops early
+    - cron: "37 20 * * 6"   # Saturdays: pick up the month's newly expired contracts
 
 concurrency:
   group: upstox-backfill
@@ -43,8 +44,12 @@ jobs:
         env:
           UPSTOX_ACCESS_TOKEN: ${{ secrets.UPSTOX_ACCESS_TOKEN }}
         run: |
+          set -o pipefail
+          got=0
           for i in 1 2 3 4 5; do
-            python scripts/upstox_backfill.py --out data/upstox --max-minutes 60
+            python scripts/upstox_backfill.py --out data/upstox --max-minutes 60 | tee /tmp/round.log
+            n=$(sed -n 's/^Finished this run: \([0-9]*\) stock-expiries.*/\1/p' /tmp/round.log | tail -1)
+            got=$((got + ${n:-0}))
             cd data/upstox
             git add -A
             git diff --cached --quiet || git commit -q -m "Upstox history $(date -u +%F_%H%M)"
@@ -54,13 +59,14 @@ jobs:
               echo "All history downloaded."; break
             fi
           done
+          echo "got=$got" >> "$GITHUB_ENV"
       - name: Continue, or start training when done
         if: success()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if python -c "import json,sys; sys.exit(0 if json.load(open('data/upstox/status.json'))['left']==0 else 1)"; then
-            gh workflow run train.yml --ref main
+            if [ "$got" -gt 0 ]; then gh workflow run train.yml --ref main; else echo "Nothing new, no retraining."; fi
           else
             gh workflow run backfill.yml --ref main
           fi
