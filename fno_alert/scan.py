@@ -385,7 +385,7 @@ def run(config: dict, mode: str = "auto", dry_run: bool = False, only: list[str]
         except Exception as e:  # the dashboard log must never block alerts
             print(f"Dashboard log not written: {type(e).__name__}: {e}")
         try:
-            run_paper(st, ux, instr, alerts, now, mode, list(mkt_today.index), rules)
+            run_paper(st, ux, instr, alerts, now, mode, list(mkt_today.index), rules, paper.Sizing.from_cfg(config))
         except Exception as e:  # paper trading must never block alerts
             print(f"Paper trades not updated: {type(e).__name__}: {e}")
     return alerts
@@ -446,7 +446,7 @@ def chain_cols():
             "ce_oi_near", "F", "max_pain", "call_wall", "put_wall", "fut_close", "lot"]
 
 
-def run_paper(st, ux, instr, alerts, now, mode, session_dates, rules):
+def run_paper(st, ux, instr, alerts, now, mode, session_dates, rules, sizing=paper.Sizing()):
     """Record new alerts as paper trades and fill entries/exits on real prices."""
     today = now.date()
     book = paper.load(st.root)
@@ -462,7 +462,7 @@ def run_paper(st, ux, instr, alerts, now, mode, session_dates, rules):
 
     sessions = sorted({pd.Timestamp(d).date() for d in session_dates})
     after_close = mode == "eod" or now.time() >= dt.time(15, 30)
-    book = paper.update(book, today, sessions, after_close, ux.quotes, candle, rules)
+    book = paper.update(book, today, sessions, after_close, ux.quotes, candle, rules, sizing)
     open_keys = [k for _, r in book[book["status"] == paper.OPEN].iterrows() for k in (r["ce_key"], r["pe_key"])
                  if isinstance(k, str) and k]
     if open_keys:
@@ -471,7 +471,8 @@ def run_paper(st, ux, instr, alerts, now, mode, session_dates, rules):
     done = book[book["status"] == paper.CLOSED]
     print(f"Paper trades: {int((book['status'] == paper.OPEN).sum())} open, "
           f"{int((book['status'] == paper.PENDING).sum())} waiting for the open, {len(done)} closed"
-          + (f", total P&L Rs {done['pnl_per_lot'].sum():,.0f} per lot" if len(done) else ""))
+          + (f", total P&L Rs {done['pnl_total'].fillna(0).sum():,.0f}" if len(done) else "")
+          + f", Rs {paper.equity(book, sizing)['in_use']:,.0f} in open trades")
 
 
 def trade_legs(action: str, r: dict, opts: pd.DataFrame, rules: strategy.TradeRules, today: dt.date) -> list:

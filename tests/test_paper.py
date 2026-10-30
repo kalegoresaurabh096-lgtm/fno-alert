@@ -68,3 +68,24 @@ def test_missed_entry_uses_candle_and_unknown_contract_is_skipped(tmp_path):
     iex, abc = book.set_index("symbol").loc["IEX"], book.set_index("symbol").loc["ABC"]
     assert iex["status"] == paper.OPEN and iex["entry_date"] == "2026-10-30" and iex["entry_pe"] == 2.0
     assert abc["status"] == paper.SKIPPED
+
+
+def test_position_sizing(tmp_path):
+    now = dt.datetime(2026, 10, 29, 16, 20)
+    instr = _instr()
+    book = paper.add_alerts(paper.load(str(tmp_path)), [_alert()], instr, now)
+    sessions = [D(2026, 10, 29), D(2026, 10, 30)]
+    q = lambda keys: {k: {"ohlc": {"open": 4.0}, "last_price": 4.5} for k in keys}
+    nc = lambda k, d: (float("nan"), float("nan"))
+    # one lot costs 8 * 4350 = Rs 34,800: fits a Rs 50k cap once, not a Rs 25k cap
+    s = paper.Sizing(capital=500_000, max_trade_pct=0.10, max_open_pct=0.5)
+    b = paper.update(book, D(2026, 10, 30), sessions, False, q, nc, sizing=s)
+    assert b["lots"].iloc[0] == 1 and b["capital_used"].iloc[0] == 34800
+    b = paper.mark_to_market(b, q(["NSE_FO|CE106", "NSE_FO|PE106"]))
+    assert b["pnl_total"].iloc[0] == b["pnl_per_lot"].iloc[0]
+    eq = paper.equity(b, s)
+    assert eq["in_use"] == 34800 and eq["equity"] == 500_000
+    small = paper.Sizing(capital=500_000, max_trade_pct=0.05)
+    b2 = paper.update(book, D(2026, 10, 30), sessions, False, q, nc, sizing=small)
+    assert b2["status"].iloc[0] == paper.SKIPPED and "cap" in b2["note"].iloc[0]
+    assert paper.Sizing.from_cfg({"paper": {"capital": 1e6}}).capital == 1e6

@@ -17,3 +17,9 @@ holdout_frac = 0.4          # last 40% of the out-of-sample period is the untouc
 target_lift = 2.5           # alert threshold must make big moves >= 2.5x more likely than random
 min_alerts_per_day = 0.3
 max_alerts_per_day = 5.0     # average cap, so the inbox stays readable
+
+[paper]
+# Automatic paper trading of the emailed ideas (state/paper/trades.csv)
+capital = 500000            # starting paper capital, Rs
+max_trade_pct = 0.10        # one trade may cost at most 10% of capital (a stock straddle lot is ~Rs 38k)
+max_open_pct = 0.50         # keep at least half the capital unused at all times

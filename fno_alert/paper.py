@@ -6,6 +6,10 @@ Same rules as the backtest (strategy.simulate):
 * Exit at the **close of the 5th session after the alert** (the price at the
   end-of-day scan, which runs after 15:30), or earlier if expiry is that close.
 * Costs from strategy.side_cost, the same as in the backtest.
+* Position sizing (config.toml [paper]): a starting capital, a cap on what one
+  trade may cost, and a cap on how much capital is in open trades at once, so
+  most of the money stays unused. A trade whose one lot costs more than the cap
+  is skipped, as a real account with that capital would have to.
 
 One trade per stock at a time, so the intraday and end-of-day emails for the
 same stock do not double count. The book lives in state/paper/trades.csv and
@@ -16,6 +20,7 @@ from __future__ import annotations
 import datetime as dt
 import math
 import os
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -25,10 +30,22 @@ from . import strategy
 COLS = ["alert_date", "alert_time", "symbol", "action", "p_big", "expiry", "lot",
         "ce_strike", "pe_strike", "ce_key", "pe_key", "alert_ce", "alert_pe",
         "status", "entry_date", "entry_ce", "entry_pe", "exit_date", "exit_ce", "exit_pe",
-        "sessions", "pnl_per_lot", "ret", "note"]
+        "sessions", "pnl_per_lot", "ret", "lots", "capital_used", "pnl_total", "note"]
 OPEN, PENDING, CLOSED, SKIPPED = "open", "pending", "closed", "skipped"
 TEXT = ["alert_date", "alert_time", "symbol", "action", "expiry", "ce_key", "pe_key", "status",
         "entry_date", "exit_date", "note"]
+
+
+@dataclass(frozen=True)
+class Sizing:
+    capital: float = 500_000.0     # starting paper capital (Rs)
+    max_trade_pct: float = 0.10    # one trade may cost at most this share of capital
+    max_open_pct: float = 0.50     # at most this share of capital in open trades at once
+
+    @classmethod
+    def from_cfg(cls, cfg: dict | None):
+        c = (cfg or {}).get("paper", {}) or {}
+        return cls(**{k: float(c[k]) for k in ("capital", "max_trade_pct", "max_open_pct") if k in c})
 
 
 def _typed(book: pd.DataFrame) -> pd.DataFrame:
@@ -136,7 +153,8 @@ def _quote_price(q: dict | None, field: str) -> float:
 
 
 def update(book: pd.DataFrame, today: dt.date, sessions: list[dt.date], after_close: bool,
-           quote_fn, candle_fn, rules: strategy.TradeRules = strategy.TradeRules()) -> pd.DataFrame:
+           quote_fn, candle_fn, rules: strategy.TradeRules = strategy.TradeRules(),
+           sizing: Sizing = Sizing()) -> pd.DataFrame:
     """Fill entries and exits.
 
     sessions: trading days known so far, including today if the market is open.
@@ -177,9 +195,23 @@ def update(book: pd.DataFrame, today: dt.date, sessions: list[dt.date], after_cl
                     book.at[i, "status"] = SKIPPED
                     book.at[i, "note"] = "no traded open price on entry day"
                 continue
+            lot = float(r["lot"]) if r["lot"] == r["lot"] else 1.0
+            cost = sum(px.values()) * lot
+            in_use = book.loc[book["status"] == OPEN, "capital_used"].fillna(0).sum()
+            lots = min(math.floor(sizing.capital * sizing.max_trade_pct / cost),
+                       math.floor(max(sizing.capital * sizing.max_open_pct - in_use, 0) / cost)) if cost > 0 else 0
+            if lots < 1:
+                book.at[i, "status"] = SKIPPED
+                book.at[i, "note"] = (f"one lot costs Rs {cost:,.0f}, over the Rs "
+                                      f"{sizing.capital * sizing.max_trade_pct:,.0f} per-trade cap"
+                                      if cost > sizing.capital * sizing.max_trade_pct else
+                                      "would put too much capital in open trades")
+                continue
             book.at[i, "entry_date"] = d_in.isoformat()
             for o, v in px.items():
                 book.at[i, f"entry_{o}"] = v
+            book.at[i, "lots"] = lots
+            book.at[i, "capital_used"] = round(cost * lots, 2)
             book.at[i, "status"] = OPEN
             r = book.loc[i]
         exp = dt.date.fromisoformat(str(r["expiry"])[:10])
@@ -201,6 +233,7 @@ def update(book: pd.DataFrame, today: dt.date, sessions: list[dt.date], after_cl
             book.at[i, f"exit_{o}"] = x
         book.at[i, "exit_date"] = d_exit.isoformat()
         book.at[i, "pnl_per_lot"] = round(pnl * lot, 2)
+        book.at[i, "pnl_total"] = round(pnl * lot * _lots(r), 2)
         book.at[i, "ret"] = round(pnl / paid, 4) if paid else np.nan
         book.at[i, "status"] = CLOSED
     return book
@@ -221,5 +254,20 @@ def mark_to_market(book: pd.DataFrame, quotes: dict, rules: strategy.TradeRules 
             paid += e
         else:
             book.at[i, "pnl_per_lot"] = round(pnl * lot, 2)
+            book.at[i, "pnl_total"] = round(pnl * lot * _lots(r), 2)
             book.at[i, "ret"] = round(pnl / paid, 4) if paid else np.nan
     return book
+
+
+def _lots(r) -> float:
+    return float(r["lots"]) if r["lots"] == r["lots"] else 1.0
+
+
+def equity(book: pd.DataFrame, sizing: Sizing = Sizing()) -> dict:
+    """Capital after closed trades, capital in open trades, and the cash left unused."""
+    book = _typed(book)
+    closed = book.loc[book["status"] == CLOSED, "pnl_total"].fillna(0).sum()
+    in_use = book.loc[book["status"] == OPEN, "capital_used"].fillna(0).sum()
+    eq = sizing.capital + closed
+    return {"capital": sizing.capital, "equity": round(eq, 2), "in_use": round(in_use, 2),
+            "unused_pct": round(1 - in_use / eq, 4) if eq else np.nan}
