@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from . import dashlog
-from . import alerting, chain, emailer, explain, features as feat, panel, prices, strategy
+from . import alerting, chain, emailer, explain, features as feat, panel, paper, prices, strategy
 from .model import Fitted
 from .upstox import IST, Upstox, chain_to_frames
 
@@ -347,6 +347,7 @@ def run(config: dict, mode: str = "auto", dry_run: bool = False, only: list[str]
             why.insert(0, "Note: a split/bonus was detected today and prices were adjusted; check before trading")
         r.update({"action": action, "direction": dlabel, "trade_why": twhy, "reasons": why,
                   "trade_text": trade_text(action, r, chains[r["symbol"]], rules, today),
+                  "legs": trade_legs(action, r, chains[r["symbol"]], rules, today),
                   "buildup": feat.buildup_label(r.get("ret1", np.nan), r.get("fut_oi_chg", np.nan)),
                   "expiry": str(strategy.pick_trade_expiry(chains[r["symbol"]]["expiry"].unique(),
                                                            pd.Timestamp(today), rules.min_trade_dte).date())})
@@ -383,6 +384,10 @@ def run(config: dict, mode: str = "auto", dry_run: bool = False, only: list[str]
                            len(results), errors, ux.calls, last.get("nifty"), last.get("vix"))
         except Exception as e:  # the dashboard log must never block alerts
             print(f"Dashboard log not written: {type(e).__name__}: {e}")
+        try:
+            run_paper(st, ux, instr, alerts, now, mode, list(mkt_today.index), rules)
+        except Exception as e:  # paper trading must never block alerts
+            print(f"Paper trades not updated: {type(e).__name__}: {e}")
     return alerts
 
 
@@ -441,23 +446,67 @@ def chain_cols():
             "ce_oi_near", "F", "max_pain", "call_wall", "put_wall", "fut_close", "lot"]
 
 
-def trade_text(action: str, r: dict, opts: pd.DataFrame, rules: strategy.TradeRules, today: dt.date) -> str:
+def run_paper(st, ux, instr, alerts, now, mode, session_dates, rules):
+    """Record new alerts as paper trades and fill entries/exits on real prices."""
+    today = now.date()
+    book = paper.load(st.root)
+    book = paper.add_alerts(book, alerts, instr, now)
+    if book.empty:
+        return
+    book = paper.resolve_keys(book, instr)
+
+    def candle(key, day):
+        c = ux.daily_candles(key, day, day)
+        c = c[c["date"].dt.date == day] if len(c) else c
+        return (float(c["open"].iloc[0]), float(c["close"].iloc[0])) if len(c) else (math.nan, math.nan)
+
+    sessions = sorted({pd.Timestamp(d).date() for d in session_dates})
+    after_close = mode == "eod" or now.time() >= dt.time(15, 30)
+    book = paper.update(book, today, sessions, after_close, ux.quotes, candle, rules)
+    open_keys = [k for _, r in book[book["status"] == paper.OPEN].iterrows() for k in (r["ce_key"], r["pe_key"])
+                 if isinstance(k, str) and k]
+    if open_keys:
+        book = paper.mark_to_market(book, ux.quotes(sorted(set(open_keys))), rules)
+    paper.save(st.root, book)
+    done = book[book["status"] == paper.CLOSED]
+    print(f"Paper trades: {int((book['status'] == paper.OPEN).sum())} open, "
+          f"{int((book['status'] == paper.PENDING).sum())} waiting for the open, {len(done)} closed"
+          + (f", total P&L Rs {done['pnl_per_lot'].sum():,.0f} per lot" if len(done) else ""))
+
+
+def trade_legs(action: str, r: dict, opts: pd.DataFrame, rules: strategy.TradeRules, today: dt.date) -> list:
+    """[(leg, strike, expiry date, last price)] for the suggested trade, or []."""
     if action == "NO TRADE":
-        return "No trade suggested"
+        return []
     exp = strategy.pick_trade_expiry(opts["expiry"].unique(), pd.Timestamp(today), rules.min_trade_dte)
     if exp is None:
-        return action
+        return []
     ch = opts[pd.to_datetime(opts["expiry"]) == exp]
     F = r.get("F") or r.get("spot")
     if ch.empty or not F:
-        return action
+        return []
     legs = ["BUY CE", "BUY PE"] if action == "BUY CE + BUY PE" else [action]
-    parts, total = [], 0.0
-    lot = r.get("lot") or 0
+    out = []
     for leg in legs:
         K = strategy.strike_for(leg, F, ch["strike"].unique(), r.get("atm_iv", np.nan), (exp.date() - today).days, rules)
+        if not (K == K):
+            return []
         q = ch[(ch["strike"] == K) & (ch["opt"] == leg[-2:])]
         ltp = float(q["close"].iloc[0]) if len(q) and q["close"].iloc[0] == q["close"].iloc[0] else math.nan
+        out.append((leg, float(K), exp.date(), ltp))
+    return out
+
+
+def trade_text(action: str, r: dict, opts: pd.DataFrame, rules: strategy.TradeRules, today: dt.date) -> str:
+    if action == "NO TRADE":
+        return "No trade suggested"
+    legs = trade_legs(action, r, opts, rules, today)
+    if not legs:
+        return action
+    F = r.get("F") or r.get("spot")
+    parts, total = [], 0.0
+    lot = r.get("lot") or 0
+    for leg, K, exp, ltp in legs:
         total += ltp if ltp == ltp else 0
         parts.append(f"{leg} {K:g} {exp:%d %b}" + (f" (last Rs {ltp:,.2f})" if ltp == ltp else ""))
     txt = " + ".join(parts)

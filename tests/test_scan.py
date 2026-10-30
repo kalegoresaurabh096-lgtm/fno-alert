@@ -164,3 +164,18 @@ def test_model_handles_infinite_features():
         m = model.fit(df, ["f1", "f2"], kind)
         p = m.predict(df)
         assert np.isfinite(p.to_numpy()).all()
+
+
+def test_scan_records_paper_trades(tmp_path, monkeypatch, capsys):
+    from fno_alert import emailer, paper, strategy
+    monkeypatch.setattr(scan, "Upstox", FakeUpstox)
+    monkeypatch.setattr(emailer, "send", lambda *a, **k: None)
+    monkeypatch.setattr(strategy, "suggest", lambda *a, **k: ("BUY CE + BUY PE", "EITHER WAY", "test"))
+    cfg = {"alerts": {"fallback_rule_threshold": 0.2}, "backtest": {"min_turnover_cr": 0}}
+    st = tmp_path / "state"
+    scan.run(cfg, mode="eod", dry_run=False, state_dir=str(st), model_dir=str(tmp_path / "none"))
+    out = capsys.readouterr().out
+    assert "Paper trades not updated" not in out
+    book = paper.load(str(st))
+    assert "CCC" in set(book["symbol"])
+    assert (st / "dash" / "paper.csv").exists()
