@@ -1,2 +1,2 @@
-alert_date,alert_time,symbol,action,p_big,expiry,lot,ce_strike,pe_strike,ce_key,pe_key,alert_ce,alert_pe,status,entry_date,entry_ce,entry_pe,exit_date,exit_ce,exit_pe,sessions,pnl_per_lot,ret,note
-2026-10-29,2026-10-29 15:30,IEX,BUY CE + BUY PE,0.3157,2026-11-23,4350.0,106.0,106.0,,,4.0,3.62,pending,,,,,,,0.0,,,added by hand: first alert before paper trading existed
+alert_date,alert_time,symbol,action,p_big,expiry,lot,ce_strike,pe_strike,ce_key,pe_key,alert_ce,alert_pe,status,entry_date,entry_ce,entry_pe,exit_date,exit_ce,exit_pe,sessions,pnl_per_lot,ret,lots,capital_used,pnl_total,note
+2026-10-29,2026-10-29 15:30,IEX,BUY CE + BUY PE,0.3157,2026-11-23,4350.0,106.0,106.0,NSE_FO|126310,NSE_FO|126331,4.0,3.62,open,2026-10-30,2.92,4.13,,,,1.0,-1936.43,-0.0631,1.0,30667.5,-1936.43,added by hand: first alert before paper trading existed
