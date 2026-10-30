@@ -18,3 +18,4 @@ run_time,date,mode,model,threshold,scanned,errors,alerts,api_calls,near_threshol
 2026-10-29 13:34,2026-10-29,intraday,model,0.3011,218,0,0,436,4,LAURUSLABS,0.2969,22860.95,15.48
 2026-10-29 15:30,2026-10-29,intraday,model,0.3011,218,0,2,436,6,IEX,0.3157,22936.75,15.12
 2026-10-29 16:25,2026-10-29,eod,model,0.3011,218,0,2,436,5,MUTHOOTFIN,0.3151,22936.75,15.12
+2026-10-30 11:04,2026-10-30,intraday,model,0.3011,218,0,0,436,0,DIXON,0.205,22989.85,15.43
