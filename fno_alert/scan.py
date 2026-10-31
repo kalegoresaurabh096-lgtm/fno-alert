@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from . import dashlog
-from . import alerting, chain, emailer, explain, features as feat, panel, paper, prices, strategy
+from . import alerting, chain, emailer, explain, features as feat, momentum, panel, paper, prices, strategy
 from .model import Fitted
 from .upstox import IST, Upstox, chain_to_frames
 
@@ -388,6 +388,10 @@ def run(config: dict, mode: str = "auto", dry_run: bool = False, only: list[str]
             run_paper(st, ux, instr, alerts, now, mode, list(mkt_today.index), rules, paper.Sizing.from_cfg(config))
         except Exception as e:  # paper trading must never block alerts
             print(f"Paper trades not updated: {type(e).__name__}: {e}")
+        try:
+            print(run_momentum(st, uni, quotes, lots_hist, today, mode, mkt_today, config))
+        except Exception as e:  # the momentum book must never block alerts
+            print(f"Momentum not updated: {type(e).__name__}: {e}")
     return alerts
 
 
@@ -444,6 +448,24 @@ def chain_cols():
     return ["atm_iv", "straddle_pct", "skew", "dte", "ce_oi", "pe_oi", "ce_chg_oi", "pe_chg_oi", "ce_vol",
             "pe_vol", "fut_oi", "fut_chg_oi", "fut_vol", "pe_chg_near", "ce_chg_near", "pe_oi_near",
             "ce_oi_near", "F", "max_pain", "call_wall", "put_wall", "fut_close", "lot"]
+
+
+def run_momentum(st, uni, quotes, lots_hist, today, mode, mkt_today, config):
+    """Monthly momentum picks email and paper portfolio (fno_alert/momentum.py)."""
+    bars = {}
+    for u in uni.itertuples(index=False):
+        b = quote_bar(quotes.get(u.underlying_key, {}), today)
+        if len(b):
+            bars[u.symbol] = b.iloc[0].drop("date").to_dict()
+    nifty = float(mkt_today["nifty"].iloc[-1]) if len(mkt_today) and "nifty" in mkt_today else None
+
+    def send(subject, text, body):
+        if os.environ.get("SMTP_USER") and os.environ.get("SMTP_PASSWORD"):
+            emailer.send(subject, text, body)
+        else:
+            print("Email settings missing; momentum email not sent:\n" + text)
+
+    return momentum.run(st.root, list(uni["symbol"]), st.load_px, bars, lots_hist, today, mode, nifty, config, send)
 
 
 def run_paper(st, ux, instr, alerts, now, mode, session_dates, rules, sizing=paper.Sizing()):

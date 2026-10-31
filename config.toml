@@ -23,3 +23,9 @@ max_alerts_per_day = 5.0     # average cap, so the inbox stays readable
 capital = 500000            # starting paper capital, Rs
 max_trade_pct = 0.10        # one trade may cost at most 10% of capital (a stock straddle lot is ~Rs 38k)
 max_open_pct = 0.50         # keep at least half the capital unused at all times
+
+[momentum]
+# Monthly 12-1 momentum picks (emailed on the first trading day of each month, paper-traded)
+top_n = 30                  # hold the 30 F&O stocks with the best 12-1 month return
+capital = 500000            # paper capital, Rs (delivery, not F&O)
+min_turnover_cr = 10.0      # skip thinly traded stocks
