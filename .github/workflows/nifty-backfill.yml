@@ -1,0 +1,60 @@
+name: Download NIFTY option history
+
+# Pulls about 2 years of expired NIFTY options (needs Upstox Plus) into the
+# nifty-data branch, for the index option-selling backtest. Restarts itself until done.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: upstox-backfill
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Open the nifty-data branch at data/nifty
+        run: |
+          git config --global user.name "fno-alert-bot"
+          git config --global user.email "fno-alert-bot@users.noreply.github.com"
+          if git fetch --depth 1 origin nifty-data; then
+            git worktree add data/nifty FETCH_HEAD
+            git -C data/nifty switch -c nifty-data
+          else
+            git worktree add --orphan -b nifty-data data/nifty
+          fi
+          echo ".cache/" > data/nifty/.gitignore
+      - name: Download (5 rounds of up to an hour, saved after each)
+        env:
+          UPSTOX_ACCESS_TOKEN: ${{ secrets.UPSTOX_ACCESS_TOKEN }}
+        run: |
+          for i in 1 2 3 4 5; do
+            python scripts/nifty_backfill.py --out data/nifty --max-minutes 60
+            cd data/nifty
+            git add -A
+            git diff --cached --quiet || git commit -q -m "NIFTY options $(date -u +%F_%H%M)"
+            git push -q origin nifty-data
+            cd ../..
+            if python -c "import json,sys; sys.exit(0 if json.load(open('data/nifty/status.json'))['left']==0 else 1)"; then
+              echo "All NIFTY history downloaded."; break
+            fi
+          done
+      - name: Continue if not done
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -c "import json,sys; sys.exit(0 if json.load(open('data/nifty/status.json'))['left']==0 else 1)" \
+            || gh workflow run nifty-backfill.yml --ref main
