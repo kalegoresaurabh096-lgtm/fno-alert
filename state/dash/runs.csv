@@ -23,3 +23,4 @@ run_time,date,mode,model,threshold,scanned,errors,alerts,api_calls,near_threshol
 2026-10-30 15:30,2026-10-30,intraday,model,0.3011,218,0,0,436,0,DIXON,0.2234,23053.1,15.28
 2026-10-30 16:24,2026-10-30,eod,model,0.3011,218,0,0,436,0,DIXON,0.2234,23053.1,15.3
 2026-11-02 11:21,2026-11-02,intraday,model,0.3011,218,0,0,436,0,LUPIN,0.1997,23317.45,15.64
+2026-11-02 13:53,2026-11-02,intraday,model,0.3011,218,0,0,436,0,LUPIN,0.2158,23240.5,15.78
