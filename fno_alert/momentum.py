@@ -67,6 +67,8 @@ class Book:
         os.makedirs(self.dir, exist_ok=True)
         self.hold = self._read("holdings.csv", HOLD_COLS)
         self.orders = self._read("orders.csv", ORDER_COLS)
+        # Empty columns read back from CSV as float; fills write a date string into them.
+        self.orders["fill_date"] = self.orders["fill_date"].astype(object).where(self.orders["fill_date"].notna(), "")
         self.equity = self._read("equity.csv", ["date", "equity", "cash", "invested", "nifty"])
         st = self._read("state.csv", ["key", "value"])
         self.state = dict(zip(st["key"], st["value"]))

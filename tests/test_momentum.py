@@ -64,3 +64,17 @@ def test_scan_runs_momentum(tmp_path, monkeypatch, capsys):
     sent.clear()
     scan.run(cfg, mode="eod", dry_run=False, state_dir=str(st), model_dir=str(tmp_path / "none"))
     assert not any(s.startswith("Momentum picks") for s in sent)
+
+
+def test_fill_after_reload_from_csv(tmp_path):
+    # Orders saved by one scan and filled by the next: empty CSV columns come back as float.
+    r = momentum.Rules(top_n=2, capital=100_000, min_turnover_cr=0)
+    b = momentum.Book(str(tmp_path), r)
+    ranked = pd.DataFrame({"symbol": ["A", "B"], "mom": [.5, .3], "close": [100., 50.], "rank": [1, 2]})
+    b.plan(ranked, dt.date(2026, 11, 2))
+    b.save()
+    b = momentum.Book(str(tmp_path), r)
+    b.fill(dt.date(2026, 11, 3), {"A": 100, "B": 50})
+    b.save()
+    o = pd.read_csv(tmp_path / "momentum" / "orders.csv")
+    assert list(o["status"]) == ["filled", "filled"] and list(o["fill_date"]) == ["2026-11-03"] * 2
