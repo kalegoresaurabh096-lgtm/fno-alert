@@ -1,7 +1,8 @@
 name: Intraday paper trading
 
 # Runs the intraday selling rules on live Upstox prices every trading day, paper only:
-# no orders are ever sent from this workflow. Emails each entry, exit and skipped setup.
+# no orders are ever sent from this workflow. No emails: every entry, exit and skipped
+# setup is logged for the dashboard.
 # State (open position, trades, days) is saved to state/intraday/paper/ in the repo.
 
 on:
@@ -31,9 +32,6 @@ jobs:
       - name: Paper trade until the close
         env:
           UPSTOX_ACCESS_TOKEN: ${{ secrets.UPSTOX_ACCESS_TOKEN }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          ALERT_TO: ${{ secrets.ALERT_TO }}
         run: |
           # save state every 10 minutes so a later job can pick up an open position
           ( while sleep 600; do bash .github/save-state.sh "intraday paper" || true; done ) &

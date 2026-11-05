@@ -34,6 +34,7 @@ from .rules import Rules, hm, load_events
 
 KEYS = {"NIFTY": "NSE_INDEX|Nifty 50", "SENSEX": "BSE_INDEX|SENSEX"}
 VIX = "NSE_INDEX|India VIX"
+EMAIL = False  # Saurabh asked for no emails (2026-11-05): results go to the dashboard
 
 
 def now_ist() -> dt.datetime:
@@ -177,8 +178,8 @@ class Book:
 def notify(subject: str, lines: list[str], dry: bool):
     text = "\n".join(lines + ["", "Paper/automated trading log. Not investment advice; past results do not "
                                   "guarantee future results. Option selling can lose more than planned."])
-    print(f"[email] {subject}\n{text}", flush=True)
-    if dry or not os.environ.get("SMTP_USER"):
+    print(f"[log] {subject}\n{text}", flush=True)
+    if dry or not EMAIL or not os.environ.get("SMTP_USER"):
         return
     try:
         body = "<pre style='font:14px/1.4 monospace'>" + text.replace("&", "&amp;").replace("<", "&lt;") + "</pre>"
