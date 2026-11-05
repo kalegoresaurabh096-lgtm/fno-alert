@@ -17,4 +17,4 @@ jobs:
       - name: Probe expired-contract history
         env:
           UPSTOX_ACCESS_TOKEN: ${{ secrets.UPSTOX_ACCESS_TOKEN }}
-        run: python scripts/upstox_probe.py
+        run: python scripts/intraday_probe.py
