@@ -1,12 +1,24 @@
 name: Upstox history probe
 
+# Pulls ~2 years of 1-minute NIFTY and SENSEX weekly option candles (needs Upstox Plus)
+# into the intraday-data branch, for the intraday option-selling backtest.
+# Restarts itself until done.
+
 on:
   workflow_dispatch:
 
+concurrency:
+  group: upstox-backfill
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
 jobs:
-  probe:
+  backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -14,7 +26,42 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - name: Probe expired-contract history
+      - name: Open the intraday-data branch at data/intraday
+        run: |
+          git config --global user.name "fno-alert-bot"
+          git config --global user.email "fno-alert-bot@users.noreply.github.com"
+          if git fetch --depth 1 origin intraday-data; then
+            git worktree add data/intraday FETCH_HEAD
+            git -C data/intraday switch -c intraday-data
+          else
+            git worktree add --orphan -b intraday-data data/intraday
+          fi
+          echo ".cache/" > data/intraday/.gitignore
+      - name: Download (rounds of up to 50 minutes, saved after each)
         env:
           UPSTOX_ACCESS_TOKEN: ${{ secrets.UPSTOX_ACCESS_TOKEN }}
-        run: python scripts/intraday_probe.py
+        run: |
+          left() { python -c "import json,sys; print(json.load(open('data/intraday/$1/status.json'))['left'])" 2>/dev/null || echo 999; }
+          for i in 1 2 3 4 5 6; do
+            u=NIFTY; [ "$(left NIFTY)" = "0" ] && u=SENSEX
+            [ "$(left NIFTY)" = "0" ] && [ "$(left SENSEX)" = "0" ] && { echo "All downloaded."; break; }
+            python scripts/intraday_backfill.py --underlying $u --out data/intraday --max-minutes 50
+            cd data/intraday
+            git add -A
+            git diff --cached --quiet || git commit -q -m "$u 1-minute options $(date -u +%F_%H%M)"
+            git push -q origin intraday-data
+            cd ../..
+          done
+          echo "NIFTY left $(left NIFTY), SENSEX left $(left SENSEX)"
+      - name: Continue if not done
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for u in NIFTY SENSEX; do
+            l=$(python -c "import json; print(json.load(open('data/intraday/$u/status.json'))['left'])" 2>/dev/null || echo 999)
+            if [ "$l" != "0" ]; then
+              wf=$(basename "${GITHUB_WORKFLOW_REF%@*}")
+              gh workflow run "$wf" --ref "$GITHUB_REF_NAME"; exit 0
+            fi
+          done
