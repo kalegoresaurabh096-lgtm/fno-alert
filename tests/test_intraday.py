@@ -66,7 +66,7 @@ def test_unhedged_stop_can_slip_past_plan():
         sessions = make_history(tmp, spike_day=None)
         spike = [s for s in sessions if s.weekday() == 1][0]
         make_history(tmp, spike_day=spike)
-        r = Rules(hedged=False, trend="none", max_dte=1, vix_max=99, or_max_pct=5, gap_max_pct=5,
+        r = Rules(hedged=False, trend="none", stop_trigger="high", max_dte=1, vix_max=99, or_max_pct=5, gap_max_pct=5,
                   min_credit_pts=0.5)
         tr, _ = backtest.run([backtest.History(tmp, "NIFTY")], r, {}, start=spike, end=spike)
         assert len(tr) == 1

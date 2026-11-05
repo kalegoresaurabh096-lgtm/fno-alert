@@ -151,11 +151,12 @@ def skip_reason(snap: Snapshot, r: Rules) -> str:
 
 def trend_sides(snap: Snapshot, r: Rules) -> tuple[str, ...]:
     """Rule 6: which sides to sell. Up-trend: puts only; down-trend: calls only."""
-    if r.trend == "none":
+    if r.trend == "none" or not snap.day_open:
         return ("PE", "CE")
-    if snap.spot > snap.or_high:
+    move = (snap.spot / snap.day_open - 1) * 100
+    if move > r.trend_pct:
         return ("PE",)
-    if snap.spot < snap.or_low:
+    if move < -r.trend_pct:
         return ("CE",)
     return ("PE", "CE")
 
@@ -241,13 +242,16 @@ def check_exit(pos: Position, ts: dt.datetime, close: dict, open_: dict, hi: dic
     stop_v = pos.credit * (1 + r.stop_mult)
     tp_v = pos.credit * (1 - r.take_profit)
     v_open = value(pos, open_)
-    v_worst = value(pos, close, worst=True, hi=hi, lo=lo)
     v_close = value(pos, close)
     if v_close != v_close:
         return None
+    v_worst = value(pos, close, worst=True, hi=hi, lo=lo) if r.stop_trigger == "high" else v_close
     if r.stop_mult > 0 and v_worst == v_worst and v_worst >= stop_v:
-        # stop-market order: fills at the stop, or at the open if the bar opened past it
-        fill = max(stop_v, v_open) if v_open == v_open else max(stop_v, v_close)
+        # stop-market order: fills at the stop, or worse if the price jumped past it
+        if r.stop_trigger == "high":
+            fill = max(stop_v, v_open) if v_open == v_open else max(stop_v, v_close)
+        else:
+            fill = max(stop_v, v_close)
         if pos.hedged:
             fill = min(fill, r.wing.get(pos.underlying, 100))
         return "stop-loss", fill

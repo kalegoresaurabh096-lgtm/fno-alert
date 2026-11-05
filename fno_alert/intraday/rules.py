@@ -10,8 +10,8 @@ live trading all use the same rules. Rule numbers refer to his list:
  4  hedged              buy wings `wing` points beyond each short strike
  5  skip bad days       event days, big opening gaps, high VIX, wild first half hour,
                         too little premium: no trade
- 6  follow the trend    above the opening range: sell puts only. Below: calls only.
-                        Inside: both sides (iron condor or strangle)
+ 6  follow the trend    index up more than trend_pct since the open: sell puts only.
+                        Down more than that: calls only. In between: both sides
  7  take_profit         exit when this share of the credit has been earned (0.5 = 50%)
  8  daily_loss_pct      stop trading for the day after losing this much
  9  intraday only       every position is closed by exit_time; event days skipped
@@ -43,7 +43,8 @@ class Rules:
     last_entry_time: str = "13:30"
     exit_time: str = "15:15"        # rule 9
     or_minutes: int = 30            # opening range used for the trend (rule 6)
-    trend: str = "range"            # "range" = rule 6 as above, "none" = always both sides
+    trend: str = "open"             # "open" = rule 6 as above, "none" = always both sides
+    trend_pct: float = 0.25         # move since the open (%) that counts as a trend
     max_dte: int = 1                # trade only when the nearest expiry is <= this many sessions away
     gap_max_pct: float = 1.0        # rule 5: skip if the open gaps more than this
     vix_max: float = 22.0           # rule 5
@@ -56,6 +57,8 @@ class Rules:
     slippage: float = 0.005         # per leg per side, share of price
     min_slippage: float = 0.25      # rupees per unit
     stop_slippage: float = 0.02     # extra on stop-loss exits (market order in a fast market)
+    stop_trigger: str = "close"     # backtest: "close" = position value at each minute's close
+                                    # (how a watched stop works); "high" = worst print in the minute
     brokerage: float = 20.0         # per order
     exch_fee: dict = field(default_factory=lambda: {"NIFTY": 0.0003503, "SENSEX": 0.000325})
     sebi_fee: float = 0.000001
