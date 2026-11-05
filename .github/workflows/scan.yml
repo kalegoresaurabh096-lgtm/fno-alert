@@ -1,12 +1,13 @@
 name: F&O scan
 
 on:
-  schedule:
-    # GitHub cron is UTC (IST = UTC+5:30). Runs can start 5-20 minutes late.
-    - cron: "0 5 * * 1-5"    # 10:30 IST  intraday
-    - cron: "0 7 * * 1-5"    # 12:30 IST  intraday
-    - cron: "15 9 * * 1-5"   # 14:45 IST  intraday, still time to act before the close
-    - cron: "15 10 * * 1-5"  # 15:45 IST  end of day (the backtested signal)
+  # Scheduled scans switched off 2026-11: replaced by the intraday selling system
+  # (intraday-paper.yml). Can still be run by hand.
+  # schedule:
+  #   - cron: "0 5 * * 1-5"    # 10:30 IST  intraday
+  #   - cron: "0 7 * * 1-5"    # 12:30 IST  intraday
+  #   - cron: "15 9 * * 1-5"   # 14:45 IST  intraday
+  #   - cron: "15 10 * * 1-5"  # 15:45 IST  end of day
   workflow_dispatch:
     inputs:
       mode:

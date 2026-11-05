@@ -81,3 +81,55 @@ def test_event_day_is_skipped():
         tr, log = backtest.run([backtest.History(tmp, "NIFTY")], Rules(vix_max=99), {e: "RBI policy"}, start=e, end=e)
         assert tr.empty
         assert log.iloc[0]["reason"] == "event: RBI policy"
+
+
+def test_paper_runner_enters_and_exits(monkeypatch, tmp_path):
+    """The live loop with a fake Upstox: one entry at 09:45, exit by the rules, state saved."""
+    from fno_alert.intraday import live
+
+    monkeypatch.chdir(tmp_path)
+    clock = {"t": dt.datetime(2026, 11, 9, 9, 40)}  # a Monday; expiry Tuesday -> dte 1
+    monkeypatch.setattr(live, "now_ist", lambda: clock["t"])
+    monkeypatch.setattr(live.time, "sleep", lambda s: clock.__setitem__("t", clock["t"] + dt.timedelta(seconds=s)))
+    expiry = dt.date(2026, 11, 10)
+    spot = 23000.0
+
+    def price(k, opt, t):
+        T = engine.years_left(t, 1)
+        decay = 1.0 - 0.6 * (t - dt.datetime(2026, 11, 9, 9, 45)).total_seconds() / (6 * 3600)
+        return float(engine.bs_price(spot, k, T, 0.14, opt == "CE")) * max(decay, 0.2)
+
+    class FakeUx:
+        def get(self, path, params=None):
+            return {}
+
+        def option_chain(self, key, e):
+            return [{"strike_price": k,
+                     "call_options": {"instrument_key": f"K{k}CE",
+                                      "market_data": {"ltp": price(k, "CE", clock["t"]), "bid_price": 0, "ask_price": 0}},
+                     "put_options": {"instrument_key": f"K{k}PE",
+                                     "market_data": {"ltp": price(k, "PE", clock["t"]), "bid_price": 0, "ask_price": 0}}}
+                    for k in range(22000, 24050, 50)]
+
+    monkeypatch.setattr(live, "Upstox", lambda: FakeUx())
+    monkeypatch.setattr(live.Feed, "minutes_today", lambda self, key: pd.DataFrame(
+        {"ts": pd.date_range("2026-11-09 09:15", periods=30, freq="1min"), "open": spot, "high": spot + 20,
+         "low": spot - 20, "close": spot}))
+    monkeypatch.setattr(live.Feed, "nearest_expiry", lambda self, u, d: (expiry, 65.0))
+    monkeypatch.setattr(live.Feed, "prev_close", lambda self, key, d: spot)
+
+    def ltp(self, keys):
+        out = {"NSE_INDEX|India VIX": 13.0}
+        for k in keys:
+            if k.startswith("K"):
+                out[k] = price(float(k[1:-2]), k[-2:], clock["t"])
+        return out
+
+    monkeypatch.setattr(live.Feed, "ltp", ltp)
+    live.run("paper", {"intraday": {"vix_max": 99}}, poll_sec=60, dry=True, underlyings=("NIFTY",))
+    book = live.Book("state/intraday/paper")
+    tr = book.trades()
+    assert len(tr) == 1, book.days()
+    assert tr.iloc[0]["reason"] in ("profit target", "time exit")
+    assert tr.iloc[0]["structure"] == "iron condor"
+    assert book.open_positions() == {}
