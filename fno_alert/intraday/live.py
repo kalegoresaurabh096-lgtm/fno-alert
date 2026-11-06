@@ -319,7 +319,9 @@ def main():
     ap.add_argument("--until", default=None, help="HH:MM IST to stop (default: exit time + 5 min)")
     ap.add_argument("--dry-run", action="store_true", help="no emails")
     a = ap.parse_args()
-    run(a.mode, load_config(a.config), a.poll_sec, a.until, a.dry_run)
+    cfg = load_config(a.config)
+    run(a.mode, cfg, a.poll_sec, a.until, a.dry_run,
+        underlyings=tuple(cfg.get("intraday", {}).get("underlyings", ["NIFTY", "SENSEX"])))
 
 
 if __name__ == "__main__":
