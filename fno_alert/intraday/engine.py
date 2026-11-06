@@ -33,6 +33,7 @@ class Snapshot:
     lot: float
     chain: dict             # (strike, "CE"/"PE") -> last price
     event: str = ""         # name of a scheduled event today, if any
+    rv: float = math.nan    # realised volatility of the index, last 10 sessions, annualised
 
 
 @dataclass
@@ -158,7 +159,19 @@ def trend_sides(snap: Snapshot, r: Rules) -> tuple[str, ...]:
         return ("PE",)
     if move < -r.trend_pct:
         return ("CE",)
-    return ("PE", "CE")
+    return () if r.neutral == "skip" else ("PE", "CE")
+
+
+def atm_iv(snap: Snapshot) -> float:
+    T = years_left(snap.ts, snap.dte)
+    F = forward(snap.chain, snap.spot)
+    ks = sorted({k for k, o in snap.chain if (k, "CE") in snap.chain and (k, "PE") in snap.chain})
+    if not ks:
+        return math.nan
+    k = min(ks, key=lambda x: abs(x - F))
+    ivs = implied_vol(np.array([snap.chain[(k, "CE")], snap.chain[(k, "PE")]]), F, np.array([k, k]), T,
+                      np.array([True, False]))
+    return float(np.nanmean(ivs)) if np.isfinite(ivs).any() else math.nan
 
 
 def plan_entry(snap: Snapshot, r: Rules, capital: float | None = None) -> tuple[Position | None, str]:
@@ -167,10 +180,17 @@ def plan_entry(snap: Snapshot, r: Rules, capital: float | None = None) -> tuple[
     if why:
         return None, why
     capital = capital or r.capital
+    sides = trend_sides(snap, r)
+    if not sides:
+        return None, "no clear trend"
+    if r.iv_rv_min > 0:
+        iv = atm_iv(snap)
+        if not (iv == iv and snap.rv == snap.rv and iv >= r.iv_rv_min * snap.rv):
+            return None, "options not expensive enough"
     deltas = otm_deltas(snap)
     wing = r.wing.get(snap.underlying, 100)
     legs, credit_mid = [], 0.0
-    for opt in trend_sides(snap, r):
+    for opt in sides:
         cands = [(k, d) for (k, o), d in deltas.items() if o == opt]
         if not cands:
             return None, "no option prices"

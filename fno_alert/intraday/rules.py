@@ -45,6 +45,8 @@ class Rules:
     or_minutes: int = 30            # opening range used for the trend (rule 6)
     trend: str = "open"             # "open" = rule 6 as above, "none" = always both sides
     trend_pct: float = 0.25         # move since the open (%) that counts as a trend
+    neutral: str = "both"           # no clear trend: "both" sides (condor) or "skip" the day
+    iv_rv_min: float = 0.0          # sell only if at-the-money IV >= this x recent realised vol (0 = off)
     max_dte: int = 1                # trade only when the nearest expiry is <= this many sessions away
     gap_max_pct: float = 1.0        # rule 5: skip if the open gaps more than this
     vix_max: float = 22.0           # rule 5

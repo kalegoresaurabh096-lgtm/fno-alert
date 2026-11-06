@@ -41,6 +41,9 @@ class History:
         self.idx["vix"] = self.idx["vix"].ffill()
         self.days = sorted(set(self.idx.index.date))
         self.dayset = set(self.days)
+        closes = self.idx["close"].groupby(self.idx.index.date).last()
+        rv = np.log(closes).diff().rolling(10).std() * np.sqrt(252)
+        self.rv = rv.shift(1).to_dict()  # known before the day starts
         self.files = {dt.date.fromisoformat(os.path.basename(f)[:10]): f
                       for f in glob.glob(os.path.join(d, "opt", "*.parquet"))}
         self.expiries = sorted(self.files)
@@ -118,7 +121,8 @@ def run(hists: list[History], r: Rules, events: dict, start=None, end=None, log_
             or_ = ix.iloc[: r.or_minutes]
             base = dict(underlying=h.underlying, day_open=float(ix["open"].iloc[0]), prev_close=prev_close,
                         or_high=float(or_["high"].max()), or_low=float(or_["low"].min()),
-                        expiry=e, dte=h.dte(day, e), event=events.get(day, ""))
+                        expiry=e, dte=h.dte(day, e), event=events.get(day, ""),
+                        rv=float(h.rv.get(day, math.nan)))
             pre = engine.Snapshot(ts=dt.datetime.combine(day, t_entry), spot=float(ix["close"].iloc[r.or_minutes - 1]),
                                   vix=float(ix["vix"].iloc[r.or_minutes - 1]), lot=0, chain={}, **base)
             why = engine.skip_reason(pre, r)
