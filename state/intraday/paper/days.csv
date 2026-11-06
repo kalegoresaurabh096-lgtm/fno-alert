@@ -1,1 +1,2 @@
 date,underlying,dte,time,spot,vix,action,reason
+2026-11-06,NIFTY,1,11:30,24616.3,17.08,skip,expiry too far
