@@ -5,6 +5,7 @@
   train        backtest, then fit the final model on all history (models/)
   seed-state   start the live scanner's history from data/processed
   scan         live scan via Upstox and email alerts
+  momentum     daily momentum paper portfolio and monthly picks email
   test-email   send a sample email to check SMTP settings
 """
 from __future__ import annotations
@@ -133,6 +134,11 @@ def cmd_scan(a, cfg):
     scan.run(cfg, a.mode, a.dry_run, only, a.state, a.models, a.save_html)
 
 
+def cmd_momentum(a, cfg):
+    from . import scan
+    print(scan.run_momentum_only(cfg, a.state))
+
+
 def cmd_test_email(a, cfg):
     from . import emailer
     sample = [{"symbol": "SAMPLE", "action": "BUY CE", "direction": "UP", "p_big": 0.31, "spot": 1234.5,
@@ -173,10 +179,12 @@ def main(argv=None):
                    help="only merge option snapshots into the scanner's history, keep its prices")
     s.add_argument("--state", default="state")
     sub.add_parser("test-email")
+    s = sub.add_parser("momentum", help="daily momentum paper portfolio and monthly picks email")
+    s.add_argument("--state", default="state")
     a = ap.parse_args(argv)
     cfg = load_config(a.config)
     {"build-data": cmd_build, "backtest": cmd_backtest, "train": cmd_train, "scan": cmd_scan,
-     "test-email": cmd_test_email, "seed-state": cmd_seed_state}[a.cmd](a, cfg)
+     "test-email": cmd_test_email, "seed-state": cmd_seed_state, "momentum": cmd_momentum}[a.cmd](a, cfg)
 
 
 if __name__ == "__main__":

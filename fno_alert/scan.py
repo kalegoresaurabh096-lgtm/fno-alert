@@ -450,6 +450,43 @@ def chain_cols():
             "ce_oi_near", "F", "max_pain", "call_wall", "put_wall", "fut_close", "lot"]
 
 
+def run_momentum_only(config: dict, state_dir: str = "state", mode: str = "auto") -> str:
+    """Daily momentum job for when the full scan is off: keeps stock prices,
+    lot sizes and NIFTY up to date, fills orders, marks the book and does the
+    monthly rebalance after the close."""
+    now = dt.datetime.now(IST)
+    today = now.date()
+    if mode == "auto":
+        mode = "eod" if (now.hour, now.minute) >= (15, 35) else "intraday"
+    st = State(state_dir)
+    ux = Upstox(cache_dir=st.p("cache"))
+    uni = ux.fno_universe(ux.instruments(), today)
+    excl = set(config.get("universe", {}).get("exclude", []))
+    uni = uni[~uni["symbol"].isin(excl)]
+    quotes = ux.quotes(list(uni["underlying_key"]) + list(INDEX_KEYS.values()))
+    if not market_was_open(quotes, list(uni["underlying_key"]), today):
+        return "No trades today on NSE (holiday or weekend): momentum not updated."
+    for u in uni.itertuples(index=False):
+        try:
+            px = update_history(ux, st, u.symbol, u.underlying_key, today)
+            bar = quote_bar(quotes.get(u.underlying_key, {}), today)
+            if mode == "eod" and not bar.empty:
+                st.save_px(u.symbol, merge_bars(px, bar))
+        except Exception as e:  # one stock must not stop the rest
+            print(f"  {u.symbol}: price update failed: {e}", flush=True)
+    lots_hist = st.load_table("lots.csv")
+    if mode == "eod":
+        lots_new = pd.DataFrame({"date": pd.Timestamp(today), "symbol": uni["symbol"], "lot": uni["lot"]})
+        lots_hist = pd.concat([lots_hist, lots_new], ignore_index=True) if len(lots_hist) else lots_new
+        lots_hist = lots_hist.drop_duplicates(["symbol", "date"], keep="last")
+        st.save_table("lots.csv", lots_hist)
+    q = quotes.get(INDEX_KEYS["nifty"]) or {}
+    mkt_today = pd.DataFrame({"nifty": [float(q["last_price"])]}, index=[pd.Timestamp(today)]) \
+        if q.get("last_price") else pd.DataFrame(columns=["nifty"])
+    return f"[{now:%Y-%m-%d %H:%M} IST] mode={mode} " + str(
+        run_momentum(st, uni, quotes, lots_hist, today, mode, mkt_today, config))
+
+
 def run_momentum(st, uni, quotes, lots_hist, today, mode, mkt_today, config):
     """Monthly momentum picks email and paper portfolio (fno_alert/momentum.py)."""
     bars = {}

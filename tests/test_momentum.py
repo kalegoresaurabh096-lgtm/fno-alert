@@ -78,3 +78,22 @@ def test_fill_after_reload_from_csv(tmp_path):
     b.save()
     o = pd.read_csv(tmp_path / "momentum" / "orders.csv")
     assert list(o["status"]) == ["filled", "filled"] and list(o["fill_date"]) == ["2026-11-03"] * 2
+
+
+def test_momentum_only_job(tmp_path, monkeypatch):
+    # The daily job used when the full scan is switched off.
+    from fno_alert import emailer
+    sent = []
+    monkeypatch.setattr(scan, "Upstox", FakeUpstox)
+    monkeypatch.setattr(emailer, "send", lambda *a, **k: sent.append(a[0]))
+    monkeypatch.setenv("SMTP_USER", "x@example.com")
+    monkeypatch.setenv("SMTP_PASSWORD", "x")
+    cfg = {"momentum": {"top_n": 2, "min_turnover_cr": 0}}
+    st = tmp_path / "state"
+    msg = scan.run_momentum_only(cfg, str(st), mode="eod")
+    assert "momentum rebalance" in msg and any(s.startswith("Momentum picks") for s in sent)
+    assert len(pd.read_csv(st / "momentum" / "orders.csv")) == 2
+    assert len(scan.State(str(st)).load_table("lots.csv"))
+    sent.clear()
+    scan.run_momentum_only(cfg, str(st), mode="eod")
+    assert not sent
