@@ -29,3 +29,33 @@ max_open_pct = 0.50         # keep at least half the capital unused at all times
 top_n = 30                  # hold the 30 F&O stocks with the best 12-1 month return
 capital = 500000            # paper capital, Rs (delivery, not F&O)
 min_turnover_cr = 10.0      # skip thinly traded stocks
+
+[intraday]
+# Intraday option selling (fno_alert/intraday/rules.py). The backtest, the paper run and
+# live trading all read these numbers.
+# 2026-11-06: switched to the setup found by research/intraday_search.py (chosen on
+# Oct 2024-Oct 2025, holdout Nov 2025-Nov 2026 +2.3%). Saurabh's original hedged rules
+# (09:45 entry, 1 day before expiry too, 100-pt wings) lost money: reports/intraday/variants.csv.
+underlyings = ["NIFTY"]      # paper run trades NIFTY only (SENSEX was flat in the backtest)
+capital = 500000
+risk_pct = 0.02             # rule 1: planned loss per trade at most 2% of capital
+daily_loss_pct = 0.02       # rule 8: stop for the day after losing 2%
+max_trades_per_day = 1
+hedged = false              # stop-loss instead of a hedge (Saurabh's choice); stops can fill worse
+wing = { NIFTY = 100, SENSEX = 300 }
+short_delta = 0.20
+take_profit = 0.50          # rule 7: exit at 50% of the premium
+stop_mult = 1.0             # exit when the loss equals the premium collected
+entry_time = "11:30"
+last_entry_time = "13:30"
+exit_time = "15:15"         # rule 9: flat by 15:15, nothing overnight
+max_dte = 0                 # expiry day only
+gap_max_pct = 1.0           # rule 5 no-trade filters
+vix_max = 22.0
+or_max_pct = 0.9
+
+[intraday_live]
+# Live trading through Upstox. OFF. It also needs LIVE_TRADING and UPSTOX_TRADING_TOKEN
+# set in the environment (see fno_alert/intraday/broker.py). Only Saurabh turns this on.
+enabled = false
+max_lots = 1                # hard cap on lots per trade while live trading is new
