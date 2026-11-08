@@ -91,6 +91,28 @@ python -m fno_alert scan --dry-run --symbols RELIANCE,TCS
 ```
 Schedule `python -m fno_alert scan` with `cron` or `launchd` (the Mac must be awake).
 
+## Multi-strategy desk (paper)
+
+`fno_alert/desk/` runs several strategies on one Rs 5L paper account under one
+risk engine, the way a prop desk does at retail scale. Live trading is OFF.
+
+| Part | File | What it does |
+|---|---|---|
+| Strategies | `desk/strategies.py` | **Expiry-day strangle** (11:30 on expiry day, 0.20 delta, stop at 1x premium, take profit at 50%, out by 15:15) and **weekly condor** (0.10 delta, 500-point wings, opened 15:20 on the previous expiry day, closed 15:20 on the session before expiry). They never hold positions at the same time. |
+| Risk engine | `desk/risk.py` | Kill switch, no new trades on event days, per-trade planned loss limit per strategy, margin cap, 2% account daily loss limit (close all), 6% monthly loss limit (close all and pause until resumed), auto-pause of a strategy at 1.5x its worst backtest drawdown. |
+| Backtest | `desk/backtest.py` | Both strategies minute by minute on one account with the risk engine, on 1-minute Upstox history. Results in `reports/desk/`. |
+| Paper run | `desk/live.py`, `.github/workflows/desk-paper.yml` | Two jobs each trading day (09:20 and 14:20 IST). State in `state/desk/paper/`. |
+
+Settings are in `config.toml` under `[desk]`, `[desk.risk]` and `[desk.condor]`
+(the strangle uses `[intraday]`).
+
+```bash
+python -m fno_alert.desk.backtest --data data/intraday --out reports/desk
+python -m fno_alert.desk.live --mode paper
+python -m fno_alert.desk.live --resume      # after reviewing a monthly or strategy pause
+touch state/desk/KILL                        # kill switch: close everything, open nothing
+```
+
 ## Backtest and training
 
 ```bash

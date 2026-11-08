@@ -59,3 +59,34 @@ or_max_pct = 0.9
 # set in the environment (see fno_alert/intraday/broker.py). Only Saurabh turns this on.
 enabled = false
 max_lots = 1                # hard cap on lots per trade while live trading is new
+
+[desk]
+# Multi-strategy desk (fno_alert/desk/): several strategies on one Rs 5L paper account
+# under one risk engine. Paper only. Live trading stays OFF ([intraday_live] above).
+strategies = ["strangle", "condor"]   # strangle uses the [intraday] numbers above
+
+[desk.risk]
+capital = 500000
+daily_loss_pct = 0.02        # account down 2% today (booked + open): nothing new today, close what daily_closes says
+daily_closes = "unhedged"    # the daily limit closes the stop-loss strangle but leaves the wing-capped condor
+                             # to its own exit ("all" closed it at intraday lows 3 times: desk +16.9k instead of +43.6k)
+monthly_loss_pct = 0.06      # account down 6% from the month's start: close all, pause until resumed by hand
+max_margin_frac = 0.80       # all open positions together use at most 80% of capital as margin
+max_trade_loss_pct = { strangle = 0.025, condor = 0.08 }   # planned loss of one trade, share of capital
+                             # (the condor's loss is capped by its wings: 1 lot of 500-point wings risks ~7%)
+auto_pause_mult = 1.5        # pause a strategy whose drawdown passes 1.5x its worst backtest drawdown
+block_event_days = true      # no new position on an event day (fno_alert/intraday/events.csv)
+confirm_checks = 2           # a loss limit must hold on 2 checks in a row before it closes everything
+kill_switch = false          # true = close everything and open nothing (or create state/desk/KILL)
+
+[desk.condor]
+# Weekly NIFTY iron condor (research/nifty_condor.py: 0.10 delta, 500-point wings,
+# 7 days before expiry, closed the session before expiry: +3.5%/yr per lot in the daily test)
+dte_days = 7
+short_delta = 0.10
+wing = 500
+lots = 1
+entry_time = "15:20"
+exit_time = "15:20"
+stop_loss_pct = 0.0          # 0 = no stop, the wings cap the loss
+slippage = 0.01
