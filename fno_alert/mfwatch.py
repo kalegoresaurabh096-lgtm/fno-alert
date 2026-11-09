@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import html
 import io
+import os
 import re
 import zipfile
 from dataclasses import dataclass
@@ -86,6 +87,9 @@ def _scheme_name(rows: list[list], header_at: int, sheet: str) -> str:
     return sheet
 
 
+_DEBUG_SEEN: dict[str, bool] = {}
+
+
 def parse_sheet(rows: list[list], amc: str, sheet: str) -> list[Holding]:
     """Find the holdings table in one sheet (one scheme) and return its equity rows."""
     header_at = None
@@ -105,6 +109,12 @@ def parse_sheet(rows: list[list], amc: str, sheet: str) -> list[Holding]:
     c_pct = _find_col(header, "% to nav", "% to net", "%to nav", "% of nav", "% to aum", "% of net", "nav")
     if c_pct == c_val:
         c_pct = None
+    # Values are usually in Rs lakh; some files use Rs crore or plain rupees.
+    vh = header[c_val].lower() if c_val is not None else ""
+    unit = 100.0 if re.search(r"crore|\bcr\b", vh) else (1e-5 if re.search(r"\(\s*(rs\.?|inr|₹)\s*\)$", vh) else 1.0)
+    if os.environ.get("MFWATCH_DEBUG") and not _DEBUG_SEEN.get(amc):
+        _DEBUG_SEEN[amc] = True
+        print(f"  [{amc}] header: {header}  -> isin={c_isin} name={c_name} qty={c_qty} value={c_val} pct={c_pct}")
     scheme = _scheme_name(rows, header_at, sheet)
     out = []
     for r in rows[header_at + 1:]:
@@ -114,7 +124,7 @@ def parse_sheet(rows: list[list], amc: str, sheet: str) -> list[Holding]:
         if not is_equity_isin(isin):
             continue
         get = lambda c: r[c] if c is not None and c < len(r) else None  # noqa: E731
-        out.append(Holding(amc, scheme, isin, _norm(get(c_name)), _num(get(c_qty)), _num(get(c_val)),
+        out.append(Holding(amc, scheme, isin, _norm(get(c_name)), _num(get(c_qty)), _num(get(c_val)) * unit,
                            _num(get(c_pct))))
     # Some fund houses store 1.23% as 0.0123: if the whole scheme adds up to at most 1, scale it.
     total = sum(h.pct_nav for h in out)
@@ -187,6 +197,12 @@ def parse_mcap_list(data: bytes, filename: str) -> pd.DataFrame:
 
 # ---------------------------------------------------------------- finding new positions
 
+def _name_key(name) -> str:
+    n = re.sub(r"[^a-z0-9 ]", " ", str(name).lower())
+    n = re.sub(r"\b(ltd|limited|the|india|co|company|corporation|corp)\b", " ", n)
+    return re.sub(r"\s+", "", n)
+
+
 PASSIVE_RE = re.compile(r"\b(?:ETF|INDEX|NIFTY|SENSEX|BSE|FOF|FUND OF FUNDS?|EXCHANGE TRADED|ARBITRAGE)\b", re.I)
 MIN_PCT_NAV = 0.25      # ignore token positions below 0.25% of the scheme...
 MIN_VALUE_LAKH = 1000   # ...unless they are worth at least Rs 10 crore
@@ -214,8 +230,12 @@ def new_positions(prev: pd.DataFrame, cur: pd.DataFrame, mcap: pd.DataFrame | No
     c = c[pd.Series([(a, i) not in held_before for a, i in zip(c["amc"], c["isin"])], index=c.index, dtype=bool)]
     if mcap is not None and not mcap.empty:
         m = mcap.set_index("isin")
-        c = c.assign(category=c["isin"].map(m["category"]).fillna("Not in AMFI list"),
-                     mcap_rank=c["isin"].map(m["rank"]))
+        # A share split or bonus changes the ISIN, so fall back to the company name.
+        by_name = mcap.assign(k=mcap["name"].map(_name_key)).drop_duplicates("k").set_index("k")
+        keys = c["name"].map(_name_key)
+        c = c.assign(category=c["isin"].map(m["category"]).fillna(keys.map(by_name["category"]))
+                     .fillna("Not in AMFI list"),
+                     mcap_rank=c["isin"].map(m["rank"]).fillna(keys.map(by_name["rank"])))
         c = c[c["category"].str.lower().str.startswith(("small", "not in"))]
     else:
         c = c.assign(category="", mcap_rank=float("nan"))
@@ -352,7 +372,8 @@ def monthly_files(src: dict) -> list[tuple[str, list[str]]]:
     best: dict[str, list[str]] = {}
     for href, text in page_links(src["page"], src.get("browser", False)):
         label = f"{href} {text}"
-        if not FILE_RE.search(href) or not inc.search(label) or exc.search(label):
+        fname = href.split("?")[0].rsplit("/", 1)[-1]
+        if not FILE_RE.search(href) or not inc.search(label) or exc.search(f"{fname} {text}"):
             continue
         m = month_of(text) or month_of(href.rsplit("/", 1)[-1]) or month_of(href)
         if not m:

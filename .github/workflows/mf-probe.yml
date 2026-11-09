@@ -17,4 +17,4 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt && python -m playwright install --with-deps chromium
-      - run: python -m fno_alert mfwatch --dry-run --state /tmp/mfstate
+      - run: MFWATCH_DEBUG=1 python -m fno_alert mfwatch --dry-run --state /tmp/mfstate
