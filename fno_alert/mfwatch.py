@@ -231,7 +231,8 @@ def new_positions(prev: pd.DataFrame, cur: pd.DataFrame, mcap: pd.DataFrame | No
     if mcap is not None and not mcap.empty:
         m = mcap.set_index("isin")
         # A share split or bonus changes the ISIN, so fall back to the company name.
-        by_name = mcap.assign(k=mcap["name"].map(_name_key)).drop_duplicates("k").set_index("k")
+        names = mcap["name"] if "name" in mcap else pd.Series("", index=mcap.index)
+        by_name = mcap.assign(k=names.map(_name_key)).query("k != ''").drop_duplicates("k").set_index("k")
         keys = c["name"].map(_name_key)
         c = c.assign(category=c["isin"].map(m["category"]).fillna(keys.map(by_name["category"]))
                      .fillna("Not in AMFI list"),

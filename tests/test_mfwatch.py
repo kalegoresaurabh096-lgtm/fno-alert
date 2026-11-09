@@ -73,3 +73,13 @@ def test_month_of_links():
 def test_xlsx_named_xls_is_read():
     data = _xlsx({"S1": _scheme("PPFAS Flexi Cap Fund", [["Gabriel", "INE524A01029", "Auto", 5, 9.0, 0.4]])})
     assert len(mfwatch.parse_file(data, "PPFAS_Monthly_Portfolio.xls", "PPFAS")) == 1
+
+
+def test_isin_changed_after_split_matched_by_name():
+    cols = ["amc", "scheme", "isin", "name", "qty", "value_lakh", "pct_nav"]
+    prev = pd.DataFrame([["SBI", "SBI Contra", "INE999Z01010", "X", 1, 1, 0.1]], columns=cols)
+    cur = pd.DataFrame([["SBI", "SBI Contra", "INE0B9K01033", "BANSAL WIRE INDUSTRIES LTD", 3, 900, 0.4]], columns=cols)
+    mcap = pd.DataFrame({"isin": ["INE0B9K01025"], "name": ["Bansal Wire Industries Limited"],
+                         "rank": [700], "category": ["Small Cap"]})
+    new = mfwatch.new_positions(prev, cur, mcap)
+    assert new.iloc[0]["mcap_rank"] == 700
