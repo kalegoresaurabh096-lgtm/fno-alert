@@ -54,7 +54,7 @@ def test_new_positions_only_small_caps_new_to_the_fund_house():
     assert set(new["isin"]) == {"INE524A01029"}
     assert (new["n_amcs"] == 2).all()
     subject, text, body = mfwatch.render_email(new, "Oct 2026", ["HDFC", "SBI"], ["Kotak"])
-    assert "1 stock" in subject and "Gabriel" in text and "Kotak" in text
+    assert "1 stock" in subject and "IPO" not in subject and "Gabriel" in text and "Kotak" in text
 
 
 def test_equity_isin():

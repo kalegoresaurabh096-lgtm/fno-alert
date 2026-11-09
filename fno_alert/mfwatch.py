@@ -104,7 +104,8 @@ def parse_sheet(rows: list[list], amc: str, sheet: str) -> list[Holding]:
     c_isin = _find_col(header, "isin")
     c_name = _find_col(header, "name of", "instrument", "company", "issuer", "security", avoid=("isin", "rating"))
     c_qty = _find_col(header, "quantity", "qty", "no. of shares", "units")
-    c_val = (_find_col(header, "market value", "market/fair value", "fair value", "value (rs", "value(rs")
+    c_val = (_find_col(header, "market value", "market/fair value", "fair value", "mkt val", "mkt. val",
+                       "value (rs", "value(rs")
              or _find_col(header, "value", avoid=("face", "%")))
     c_pct = _find_col(header, "% to nav", "% to net", "%to nav", "% of nav", "% to aum", "% of net", "nav")
     if c_pct == c_val:
@@ -254,50 +255,66 @@ def new_positions(prev: pd.DataFrame, cur: pd.DataFrame, mcap: pd.DataFrame | No
 
 # ---------------------------------------------------------------- email
 
-def render_email(new: pd.DataFrame, month: str, amcs_read: list[str], amcs_failed: list[str]) -> tuple[str, str, str]:
-    n_stocks = new["isin"].nunique() if not new.empty else 0
-    subject = f"Fund house new small cap buys, {month}: {n_stocks} stock{'s' if n_stocks != 1 else ''}"
-    text = [subject, ""]
-    rows = []
-    if not new.empty:  # AMFI-ranked small caps first, then recent listings / unlisted
-        new = new.assign(_unlisted=new["mcap_rank"].isna()).sort_values("_unlisted", kind="stable")
-    for isin, grp in (new.groupby("isin", sort=False) if not new.empty else []):
+def _section(new: pd.DataFrame, describe) -> tuple[list[str], str]:
+    td = "padding:6px 8px;border-top:1px solid #eee"
+    text, rows = [], []
+    for isin, grp in new.groupby("isin", sort=False):
         first = grp.iloc[0]
-        rank = (f"small cap, rank {int(first['mcap_rank'])}" if first["mcap_rank"] == first["mcap_rank"]
-                else "not in AMFI's list: recent IPO or unlisted, size unknown")
-        text.append(f"{first['name']} ({isin}, {rank})")
+        tag = describe(first)
+        text.append(f"{first['name']} ({tag})")
         for _, r in grp.iterrows():
-            line = (f"  {r['amc']}: Rs {r['value_lakh'] / 100:,.1f} cr, up to {r['top_pct_nav']:.2f}% of a scheme"
-                    f" | {r['schemes']}")
-            text.append(line)
-            rows.append(f"<tr><td style='padding:6px 8px;border-top:1px solid #eee'><b>{html.escape(first['name'])}</b>"
-                        f"<br><span style='color:#777;font-size:12px'>{html.escape(rank)}</span></td>"
-                        f"<td style='padding:6px 8px;border-top:1px solid #eee'>{html.escape(r['amc'])}</td>"
-                        f"<td style='padding:6px 8px;border-top:1px solid #eee;text-align:right'>"
-                        f"{r['value_lakh'] / 100:,.1f}</td>"
-                        f"<td style='padding:6px 8px;border-top:1px solid #eee;text-align:right'>"
-                        f"{r['top_pct_nav']:.2f}%</td>"
-                        f"<td style='padding:6px 8px;border-top:1px solid #eee;font-size:12px;color:#444'>"
-                        f"{html.escape(r['schemes'])}</td></tr>")
+            text.append(f"  {r['amc']}: Rs {r['value_lakh'] / 100:,.1f} cr, up to {r['top_pct_nav']:.2f}% of a scheme"
+                        f" | {r['schemes']}")
+            rows.append(f"<tr><td style='{td}'><b>{html.escape(first['name'])}</b>"
+                        f"<br><span style='color:#777;font-size:12px'>{html.escape(tag)}</span></td>"
+                        f"<td style='{td}'>{html.escape(r['amc'])}</td>"
+                        f"<td style='{td};text-align:right'>{r['value_lakh'] / 100:,.1f}</td>"
+                        f"<td style='{td};text-align:right'>{r['top_pct_nav']:.2f}%</td>"
+                        f"<td style='{td};font-size:12px;color:#444'>{html.escape(r['schemes'])}</td></tr>")
         text.append("")
-    if not rows:
-        text.append("No fund house started a new small cap position this month.")
+    th = "padding:6px 8px"
+    table = (f"<table style='border-collapse:collapse;font-size:14px;width:100%'>"
+             f"<tr style='text-align:left;color:#555'><th style='{th}'>Stock</th><th style='{th}'>Fund house</th>"
+             f"<th style='{th};text-align:right'>Rs cr</th><th style='{th};text-align:right'>Biggest % of a scheme</th>"
+             f"<th style='{th}'>Schemes</th></tr>" + "".join(rows) + "</table>")
+    return text, table
+
+
+def render_email(new: pd.DataFrame, month: str, amcs_read: list[str], amcs_failed: list[str]) -> tuple[str, str, str]:
+    ranked = new[new["mcap_rank"].notna()] if not new.empty else new
+    other = new[new["mcap_rank"].isna()] if not new.empty else new
+    n = ranked["isin"].nunique() if not ranked.empty else 0
+    subject = f"Fund houses' new small cap buys, {month}: {n} stock{'s' if n != 1 else ''}"
+    if not other.empty:
+        subject += f" (+{other['isin'].nunique()} IPO/unlisted)"
+    text = [subject, ""]
+    parts = []
+    if not ranked.empty:
+        t, table = _section(ranked, lambda r: f"small cap, rank {int(r['mcap_rank'])} by market cap")
+        text += t
+        parts.append(table)
+    else:
+        text.append("No fund house started a new position in an AMFI-listed small cap.")
+        parts.append("<p>No fund house started a new position in an AMFI-listed small cap.</p>")
+    if not other.empty:
+        text += ["Also new: recent IPOs and unlisted shares (not in AMFI's list yet, so size unknown)", ""]
+        t, table = _section(other, lambda r: "recent IPO or unlisted")
+        text += t
+        parts.append("<h3 style='margin-top:28px'>Also new: recent IPOs and unlisted shares</h3>"
+                     "<p style='font-size:13px;color:#555'>Not in AMFI's market cap list yet, so they may not "
+                     "be small caps.</p>" + table)
     cover = f"Fund houses read: {', '.join(amcs_read) or 'none'}."
     if amcs_failed:
         cover += f" Could not read: {', '.join(amcs_failed)}."
-    note = ("A 'new position' means the fund house held none of the stock, in any scheme, last month. "
-            "Portfolios are published about 10 days after month-end, so the buying happened during "
-            f"{month} and may still be going on. Not investment advice.")
+    note = ("A 'new position' means the fund house held none of the stock, in any scheme, the month before. "
+            "Index funds, ETFs, arbitrage funds, newly launched schemes and positions under 0.25% of a scheme "
+            "(unless worth Rs 10 cr or more) are left out. Portfolios come out about 10 days after month-end, "
+            "so the buying may still be going on. Not investment advice.")
     text += [cover, note]
-    table = ("<table style='border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;width:100%'>"
-             "<tr style='text-align:left;color:#555'><th style='padding:6px 8px'>Stock</th>"
-             "<th style='padding:6px 8px'>Fund house</th><th style='padding:6px 8px;text-align:right'>Rs cr</th>"
-             "<th style='padding:6px 8px;text-align:right'>% of scheme</th><th style='padding:6px 8px'>Schemes</th></tr>"
-             + "".join(rows) + "</table>") if rows else \
-        "<p>No fund house started a new small cap position this month.</p>"
-    body = (f"<html><body style='max-width:760px;margin:auto;font-family:Arial,sans-serif'>"
-            f"<h2>New small cap positions by fund houses &middot; {html.escape(month)}</h2>{table}"
-            f"<p style='font-size:12px;color:#777'>{html.escape(cover)}<br>{html.escape(note)}</p></body></html>")
+    body = (f"<html><body style='max-width:820px;margin:auto;font-family:Arial,sans-serif'>"
+            f"<h2>New small cap positions by fund houses &middot; {html.escape(month)}</h2>{''.join(parts)}"
+            f"<p style='font-size:12px;color:#777;margin-top:24px'>{html.escape(cover)}<br>{html.escape(note)}</p>"
+            f"</body></html>")
     return subject, "\n".join(text), body
 
 
