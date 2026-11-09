@@ -1,0 +1,37 @@
+{
+ "NIFTY": {
+  "underlying": "NIFTY",
+  "expiry": "2026-11-09",
+  "structure": "short call",
+  "legs": [
+   {
+    "strike": 25150.0,
+    "opt": "CE",
+    "side": -1,
+    "entry": 21.1
+   }
+  ],
+  "qty": 65.0,
+  "lots": 1,
+  "credit": 21.1,
+  "max_loss": 1452.0,
+  "entry_ts": "2026-11-09T11:30:06.597956",
+  "entry_cost": 25.540033381,
+  "hedged": false,
+  "exit_ts": null,
+  "exit_value": NaN,
+  "exit_reason": "",
+  "exit_cost": 0.0,
+  "notes": {
+   "spot": 24926.0,
+   "vix": 17.22,
+   "dte": 0,
+   "deltas": {
+    "25150CE": 0.186
+   },
+   "keys": {
+    "25150CE": "NSE_FO|40043"
+   }
+  }
+ }
+}
