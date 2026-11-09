@@ -65,16 +65,24 @@ def _find_col(header: list[str], *keys: str, avoid: tuple[str, ...] = ()) -> int
 def _scheme_name(rows: list[list], header_at: int, sheet: str) -> str:
     """The scheme name is usually in the first few rows above the table."""
     for r in rows[:header_at]:
-        for c in r:
-            t = _norm(c)
+        cells = [_norm(c) for c in r]
+        for k, t in enumerate(cells):
             tl = t.lower()
+            if re.match(r"(scheme name|name of the scheme|scheme)\s*[:\-]?\s*$", tl):
+                nxt = next((x for x in cells[k + 1:] if x), "")
+                if nxt:
+                    return nxt
             if len(t) > 6 and ("fund" in tl or "scheme" in tl or "etf" in tl or "plan" in tl) \
-                    and "portfolio statement" not in tl and not tl.endswith(("mutual fund", "asset management company limited",
-                                                                       "asset management co. ltd.")):
+                    and "portfolio statement" not in tl and "investment manager" not in tl \
+                    and not tl.endswith(("mutual fund", "asset management company limited",
+                                         "asset management co. ltd.", "mutual fund)")):
                 t = re.sub(r"(?i)^(scheme name|name of the scheme)\s*[:\-]\s*", "", t)
                 t = re.sub(r"(?i)\s*\(an open[- ]ended.*$", "", t)
-                t = re.sub(r"(?i)\s*portfolio as on.*$", "", t)
-                return t.strip(" :-")
+                t = re.sub(r"(?i)\s*portfolio (as on|statement).*$", "", t)
+                t = re.sub(r"(?i)^(monthly )?portfolio of\s+", "", t)
+                t = t.strip(" :-")
+                if t:
+                    return t
     return sheet
 
 
@@ -92,7 +100,8 @@ def parse_sheet(rows: list[list], amc: str, sheet: str) -> list[Holding]:
     c_isin = _find_col(header, "isin")
     c_name = _find_col(header, "name of", "instrument", "company", "issuer", "security", avoid=("isin", "rating"))
     c_qty = _find_col(header, "quantity", "qty", "no. of shares", "units")
-    c_val = _find_col(header, "market value", "market/fair value", "fair value", "value")
+    c_val = (_find_col(header, "market value", "market/fair value", "fair value", "value (rs", "value(rs")
+             or _find_col(header, "value", avoid=("face", "%")))
     c_pct = _find_col(header, "% to nav", "% to net", "%to nav", "% of nav", "% to aum", "% of net", "nav")
     if c_pct == c_val:
         c_pct = None
@@ -125,7 +134,12 @@ def _sheets(data: bytes, filename: str) -> dict[str, list[list]]:
                     for k, v in _sheets(z.read(n), n).items():
                         out[f"{Path(n).stem}|{k}"] = v
         return out
-    engine = "xlrd" if name.endswith(".xls") else ("pyxlsb" if name.endswith(".xlsb") else "openpyxl")
+    if data[:2] == b"PK" and not name.endswith(".xlsb"):
+        engine = "openpyxl"          # .xlsx, even when the file is named .xls
+    elif data[:4] == b"\xd0\xcf\x11\xe0":
+        engine = "xlrd"              # real old-style .xls
+    else:
+        engine = "pyxlsb" if name.endswith(".xlsb") else "openpyxl"
     book = pd.read_excel(io.BytesIO(data), sheet_name=None, header=None, engine=engine, dtype=object)
     return {k: v.values.tolist() for k, v in book.items()}
 
@@ -173,36 +187,48 @@ def parse_mcap_list(data: bytes, filename: str) -> pd.DataFrame:
 
 # ---------------------------------------------------------------- finding new positions
 
+PASSIVE_RE = re.compile(r"\b(?:ETF|INDEX|NIFTY|SENSEX|BSE|FOF|FUND OF FUNDS?|EXCHANGE TRADED|ARBITRAGE)\b", re.I)
+MIN_PCT_NAV = 0.25      # ignore token positions below 0.25% of the scheme...
+MIN_VALUE_LAKH = 1000   # ...unless they are worth at least Rs 10 crore
+
+
 def new_positions(prev: pd.DataFrame, cur: pd.DataFrame, mcap: pd.DataFrame | None) -> pd.DataFrame:
     """Small cap stocks a fund house holds now (in any scheme) but held in none last month.
 
-    One row per fund house and stock, listing the schemes that bought it.
-    Stocks missing from AMFI's list (new listings since it was published) count as small cap.
+    One row per fund house and stock, listing the active schemes that bought it. Skipped:
+    index funds and ETFs (they buy whatever enters an index), arbitrage funds, schemes
+    that were not in last month's file (new schemes, or a sheet we could not read then),
+    and token positions. Stocks missing from AMFI's list (listed since it was published,
+    or unlisted) are kept with category "Not in AMFI list".
     """
-    if cur.empty:
-        return cur.assign(schemes="")
-    held_before = set(zip(prev["amc"], prev["isin"])) if not prev.empty else set()
-    # A fund house only counts as "new" when we also saw its file last month.
-    amcs_before = set(prev["amc"]) if not prev.empty else set()
-    c = cur[cur["amc"].isin(amcs_before)]
-    c = c[[(a, i) not in held_before for a, i in zip(c["amc"], c["isin"])]]
+    out_cols = ["amc", "isin", "name", "qty", "value_lakh", "top_pct_nav", "category", "mcap_rank",
+                "schemes", "n_amcs"]
+    if cur.empty or prev.empty:
+        return pd.DataFrame(columns=out_cols)
+    held_before = set(zip(prev["amc"], prev["isin"]))
+    schemes_before = set(zip(prev["amc"], prev["scheme"].str.upper()))
+    c = cur[cur["amc"].isin(set(prev["amc"]))]
+    c = c[~c["scheme"].fillna("").str.contains(PASSIVE_RE)]
+    c = c[pd.Series([(a, sc.upper()) in schemes_before for a, sc in zip(c["amc"], c["scheme"].fillna(""))],
+                    index=c.index, dtype=bool)]
+    c = c[pd.Series([(a, i) not in held_before for a, i in zip(c["amc"], c["isin"])], index=c.index, dtype=bool)]
     if mcap is not None and not mcap.empty:
-        cat = mcap.set_index("isin")["category"]
-        rank = mcap.set_index("isin")["rank"]
-        c = c.assign(category=c["isin"].map(cat).fillna("Small Cap (new listing)"),
-                     mcap_rank=c["isin"].map(rank))
-        c = c[c["category"].str.lower().str.startswith("small")]
+        m = mcap.set_index("isin")
+        c = c.assign(category=c["isin"].map(m["category"]).fillna("Not in AMFI list"),
+                     mcap_rank=c["isin"].map(m["rank"]))
+        c = c[c["category"].str.lower().str.startswith(("small", "not in"))]
     else:
         c = c.assign(category="", mcap_rank=float("nan"))
     if c.empty:
-        return c.assign(schemes="")
+        return pd.DataFrame(columns=out_cols)
     g = c.groupby(["amc", "isin"], as_index=False).agg(
         name=("name", "first"), qty=("qty", "sum"), value_lakh=("value_lakh", "sum"),
         top_pct_nav=("pct_nav", "max"), category=("category", "first"), mcap_rank=("mcap_rank", "first"),
         schemes=("scheme", lambda s: "; ".join(sorted(set(s)))))
+    g = g[(g["top_pct_nav"] >= MIN_PCT_NAV) | (g["value_lakh"] >= MIN_VALUE_LAKH)]
     # How many fund houses started the same stock this month: a crowd is a stronger signal.
     g["n_amcs"] = g.groupby("isin")["amc"].transform("nunique")
-    return g.sort_values(["n_amcs", "value_lakh"], ascending=False).reset_index(drop=True)
+    return g.sort_values(["n_amcs", "value_lakh"], ascending=False).reset_index(drop=True)[out_cols]
 
 
 # ---------------------------------------------------------------- email
@@ -212,9 +238,12 @@ def render_email(new: pd.DataFrame, month: str, amcs_read: list[str], amcs_faile
     subject = f"Fund house new small cap buys, {month}: {n_stocks} stock{'s' if n_stocks != 1 else ''}"
     text = [subject, ""]
     rows = []
+    if not new.empty:  # AMFI-ranked small caps first, then recent listings / unlisted
+        new = new.assign(_unlisted=new["mcap_rank"].isna()).sort_values("_unlisted", kind="stable")
     for isin, grp in (new.groupby("isin", sort=False) if not new.empty else []):
         first = grp.iloc[0]
-        rank = f"rank {int(first['mcap_rank'])}" if first["mcap_rank"] == first["mcap_rank"] else "new listing"
+        rank = (f"small cap, rank {int(first['mcap_rank'])}" if first["mcap_rank"] == first["mcap_rank"]
+                else "not in AMFI's list: recent IPO or unlisted, size unknown")
         text.append(f"{first['name']} ({isin}, {rank})")
         for _, r in grp.iterrows():
             line = (f"  {r['amc']}: Rs {r['value_lakh'] / 100:,.1f} cr, up to {r['top_pct_nav']:.2f}% of a scheme"
@@ -255,8 +284,8 @@ def render_email(new: pd.DataFrame, month: str, amcs_read: list[str], amcs_faile
 
 MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
-_MONTH_RE = re.compile(r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s_\-.,'%20]*(?:\d{1,2}[\s_\-,]*)?"
-                       r"((?:19|20)\d{2}|\d{2})(?!\d)", re.I)
+_MONTH_RE = re.compile(r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s_\-.,'%20]*"
+                       r"(?:\d{1,2}(?:st|nd|rd|th)?[\s_\-,]*)?((?:19|20)\d{2}|\d{2})(?!\d|st|nd|rd|th)", re.I)
 _DAY_MONTH_RE = re.compile(r"(?<!\d)(\d{1,2})[\s_\-.]?(\d{1,2})[\s_\-.]?((?:20)\d{2})(?!\d)")
 
 

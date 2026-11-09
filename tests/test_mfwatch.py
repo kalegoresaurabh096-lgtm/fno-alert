@@ -33,14 +33,21 @@ def test_parse_file_finds_equity_rows_and_scheme():
 def test_new_positions_only_small_caps_new_to_the_fund_house():
     mcap = pd.DataFrame({"isin": ["INE524A01029", "INE002A01018", "INE111B01011"],
                          "rank": [600, 1, 400], "category": ["Small Cap", "Large Cap", "Small Cap"]})
+    mcap = pd.concat([mcap, pd.DataFrame({"isin": ["INE777C01011"], "rank": [900], "category": ["Small Cap"]})])
     cols = ["amc", "scheme", "isin", "name", "qty", "value_lakh", "pct_nav"]
     prev = pd.DataFrame([["HDFC", "HDFC Flexi Cap", "INE111B01011", "Old Small", 5, 10, 0.1],
-                         ["SBI", "SBI Small Cap", "INE999Z01010", "X", 1, 1, 0.1]], columns=cols)
+                         ["HDFC", "HDFC Small Cap", "INE999Z01010", "X", 5, 10, 0.1],
+                         ["HDFC", "HDFC Nifty Smallcap 250 ETF", "INE999Z01010", "X", 5, 10, 0.1],
+                         ["SBI", "SBI Small Cap", "INE999Z01010", "X", 1, 1, 0.1],
+                         ["SBI", "SBI Contra", "INE999Z01010", "X", 1, 1, 0.1]], columns=cols)
     cur = pd.DataFrame([["HDFC", "HDFC Small Cap", "INE524A01029", "Gabriel", 10, 4500, 1.2],
                         ["HDFC", "HDFC Small Cap", "INE111B01011", "Old Small", 9, 20, 0.2],  # already held
                         ["HDFC", "HDFC Top 100", "INE002A01018", "Reliance", 9, 20, 0.2],      # large cap
                         ["SBI", "SBI Small Cap", "INE524A01029", "Gabriel", 3, 900, 0.4],
-                        ["Quant", "Quant Small Cap", "INE524A01029", "Gabriel", 3, 900, 0.4]],  # no prior file
+                        ["Quant", "Quant Small Cap", "INE524A01029", "Gabriel", 3, 900, 0.4],  # no prior file
+                        ["HDFC", "HDFC Nifty Smallcap 250 ETF", "INE777C01011", "Index add", 3, 900, 0.4],
+                        ["HDFC", "HDFC New NFO Fund", "INE777C01011", "Index add", 3, 900, 0.4],  # new scheme
+                        ["SBI", "SBI Contra", "INE777C01011", "Token", 3, 50, 0.05]],  # token position
                        columns=cols)
     new = mfwatch.new_positions(prev, cur, mcap)
     assert set(new["amc"]) == {"HDFC", "SBI"}
@@ -54,3 +61,15 @@ def test_equity_isin():
     assert mfwatch.is_equity_isin("INE524A01029")
     assert not mfwatch.is_equity_isin("INE001A07ZZ1")
     assert not mfwatch.is_equity_isin("INF209K01VA1")
+
+
+def test_month_of_links():
+    assert mfwatch.month_of("monthend-portfolio-july-31st-2023.zip") == "2023-07"
+    assert mfwatch.month_of("31102026_abslmf_monthlydisclosure.zip") == "2026-10"
+    assert mfwatch.month_of("NIMF-MONTHLY-PORTFOLIO-30-Sep-26.xls") == "2026-09"
+    assert mfwatch.month_of("Portfolio as on 31st October, 2026") == "2026-10"
+
+
+def test_xlsx_named_xls_is_read():
+    data = _xlsx({"S1": _scheme("PPFAS Flexi Cap Fund", [["Gabriel", "INE524A01029", "Auto", 5, 9.0, 0.4]])})
+    assert len(mfwatch.parse_file(data, "PPFAS_Monthly_Portfolio.xls", "PPFAS")) == 1

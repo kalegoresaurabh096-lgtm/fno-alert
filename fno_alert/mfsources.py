@@ -16,7 +16,7 @@ SOURCES = [
      "include": r"all-schemes-monthly-portfolio"},
     {"amc": "Nippon India", "page": "https://mf.nipponindiaim.com/investor-service/downloads/"
                                     "factsheet-portfolio-and-other-disclosures",
-     "include": r"NIMF-MONTHLY-PORTFOLIO"},
+     "browser": True, "include": r"NIMF-MONTHLY-PORTFOLIO"},
     {"amc": "Aditya Birla Sun Life", "page": "https://mutualfund.adityabirlacapital.com/forms-and-downloads/portfolio",
      "browser": True, "include": r"/monthly-portfolio/20\d\d/"},
     {"amc": "DSP", "page": "https://www.dspim.com/mandatory-disclosures/portfolio-disclosures",
