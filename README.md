@@ -122,3 +122,16 @@ emails `[UNVALIDATED RULES]`.
   and option data. Expect most alerts to be false alarms. The backtest tells you
   the true rate.
 * Option selling has large risk. Margins shown are rough (about 20% of contract value).
+
+## Fund house small cap buys (`mfwatch`)
+
+Every fund house publishes the full portfolio of each scheme by the 10th of the next month.
+The "Fund house small cap buys" workflow checks daily from the 1st to the 15th, reads any
+newly published month, and emails the small cap stocks a fund house now holds that it held
+in none of its schemes the month before (for example HDFC Mutual Fund first buying Gabriel India).
+
+- Small cap = ranked 251st or lower in AMFI's half-yearly average market cap list (SEBI's definition).
+- Fund houses read are listed in `fno_alert/mfsources.py`; the email names any it could not read.
+- Saved holdings: `state/mfwatch/holdings/<fund house>/<YYYY-MM>.csv.gz`; every alert is logged in
+  `state/mfwatch/alerts_log.csv`.
+- Try it without emailing: `python -m fno_alert mfwatch --dry-run --only dsp,ppfas`.
