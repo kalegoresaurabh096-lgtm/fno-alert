@@ -139,6 +139,12 @@ def cmd_momentum(a, cfg):
     print(scan.run_momentum_only(cfg, a.state))
 
 
+def cmd_mfwatch(a, cfg):
+    from . import mfwatch
+    only = [s.strip().lower() for s in a.only.split(",")] if a.only else None
+    print(mfwatch.run(a.state, a.dry_run, only))
+
+
 def cmd_test_email(a, cfg):
     from . import emailer
     sample = [{"symbol": "SAMPLE", "action": "BUY CE", "direction": "UP", "p_big": 0.31, "spot": 1234.5,
@@ -181,10 +187,15 @@ def main(argv=None):
     sub.add_parser("test-email")
     s = sub.add_parser("momentum", help="daily momentum paper portfolio and monthly picks email")
     s.add_argument("--state", default="state")
+    s = sub.add_parser("mfwatch", help="email new small cap positions from fund houses' monthly portfolios")
+    s.add_argument("--state", default="state")
+    s.add_argument("--dry-run", action="store_true", help="print findings, do not email or save state")
+    s.add_argument("--only", help="comma-separated fund houses, e.g. dsp,ppfas")
     a = ap.parse_args(argv)
     cfg = load_config(a.config)
     {"build-data": cmd_build, "backtest": cmd_backtest, "train": cmd_train, "scan": cmd_scan,
-     "test-email": cmd_test_email, "seed-state": cmd_seed_state, "momentum": cmd_momentum}[a.cmd](a, cfg)
+     "test-email": cmd_test_email, "seed-state": cmd_seed_state, "momentum": cmd_momentum,
+     "mfwatch": cmd_mfwatch}[a.cmd](a, cfg)
 
 
 if __name__ == "__main__":
