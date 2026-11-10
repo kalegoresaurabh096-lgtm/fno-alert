@@ -3,9 +3,10 @@ name: Momentum portfolio
 # Daily momentum paper portfolio and monthly picks email, run on its own now
 # that the full F&O scan (scan.yml) is switched off.
 on:
-  schedule:
-    - cron: "5 5 * * 1-5"    # 10:35 IST: fill pending orders at today's open
-    - cron: "20 10 * * 1-5"  # 15:50 IST: save closing prices, mark, monthly rebalance
+  # Schedule switched off 2026-11-10 at the user's request. Can still be run by hand.
+  # schedule:
+  #  - cron: "5 5 * * 1-5"    # 10:35 IST: fill pending orders at today's open
+  #  - cron: "20 10 * * 1-5"  # 15:50 IST: save closing prices, mark, monthly rebalance
   workflow_dispatch:
 
 concurrency:

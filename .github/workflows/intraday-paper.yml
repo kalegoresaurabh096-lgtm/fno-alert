@@ -6,9 +6,10 @@ name: Intraday paper trading
 # State (open position, trades, days) is saved to state/intraday/paper/ in the repo.
 
 on:
-  schedule:
-    - cron: "50 3 * * 1-5"   # 09:20 IST: main run, until 15:20 IST
-    - cron: "30 6 * * 1-5"   # 12:00 IST: backup; waits for the main run, resumes if it died
+  # Schedule switched off 2026-11-10 at the user's request. Can still be run by hand.
+  # schedule:
+  #  - cron: "50 3 * * 1-5"   # 09:20 IST: main run, until 15:20 IST
+  #  - cron: "30 6 * * 1-5"   # 12:00 IST: backup; waits for the main run, resumes if it died
   workflow_dispatch:
 
 concurrency:
