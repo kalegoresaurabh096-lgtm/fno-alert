@@ -7,8 +7,9 @@ name: Download Upstox history
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "37 20 * * 6"   # Saturdays: pick up the month's newly expired contracts
+  # Schedule switched off 2026-11-10 at the user's request. Can still be run by hand.
+  # schedule:
+  #  - cron: "37 20 * * 6"   # Saturdays: pick up the month's newly expired contracts
 
 concurrency:
   group: upstox-backfill
