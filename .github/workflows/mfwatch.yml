@@ -42,8 +42,16 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           ALERT_TO: ${{ secrets.ALERT_TO }}
         run: python -m fno_alert mfwatch --resend-last ${{ inputs.dry_run && '--dry-run' || '' }}
-      - if: ${{ !inputs.resend_last }}
-        run: python -m playwright install --with-deps chromium
+      - name: Install the browser used for some fund house sites
+        if: ${{ !inputs.resend_last }}
+        # The extra system packages come from Ubuntu's mirrors, which are sometimes unreachable.
+        # Fall back to the browser alone so one bad mirror doesn't stop the whole check.
+        run: |
+          for i in 1 2; do
+            timeout 300 python -m playwright install --with-deps chromium && exit 0
+            echo "Browser install with system packages failed (try $i)"; sleep 30
+          done
+          python -m playwright install chromium
       - name: Read new portfolios and email new small cap positions
         if: ${{ !inputs.resend_last }}
         env:
