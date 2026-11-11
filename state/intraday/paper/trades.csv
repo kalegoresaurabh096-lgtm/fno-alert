@@ -1,2 +1,0 @@
-date,underlying,expiry,dte,structure,entry,exit,spot,vix,sold,bought,lots,qty,credit,exit_value,planned_max_loss,costs,pnl,reason,equity,loss_vs_plan
-2026-11-09,NIFTY,2026-11-09,0,short call,11:30,11:37,24926.0,17.2,25150 CE,,1,65.0,21.1,46.07,1452,50,-1674,stop-loss,498326,1.15
