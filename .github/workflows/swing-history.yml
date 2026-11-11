@@ -1,0 +1,33 @@
+name: Swing backtest - download price history
+
+# One-off research job: saves 2008+ daily prices for the top 800 companies to the
+# `swing-data` branch. Not scheduled. Does not touch the fund buys alert.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/project-thread-7izi7k]
+    paths: [swing/fetch_history.py, .github/workflows/swing-history.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pandas requests yfinance
+      - run: python swing/fetch_history.py --out /tmp/swing-data
+      - name: Save to the swing-data branch
+        run: |
+          cd /tmp/swing-data
+          git init -q -b swing-data
+          git config user.name "fno-alert-bot"
+          git config user.email "fno-alert-bot@users.noreply.github.com"
+          git add -A
+          git commit -qm "Swing history $(date -u +%F_%H%M)"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" swing-data
