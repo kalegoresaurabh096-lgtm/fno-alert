@@ -21,6 +21,9 @@ def load_dotenv(path: str = ".env"):
 
 def cmd_mfwatch(a):
     from . import mfwatch
+    if a.resend_last:
+        print(mfwatch.resend_last(a.state, a.dry_run))
+        return
     only = [s.strip().lower() for s in a.only.split(",")] if a.only else None
     print(mfwatch.run(a.state, a.dry_run, only))
 
@@ -41,6 +44,7 @@ def main(argv=None):
     s = sub.add_parser("mfwatch", help="email new small cap positions from fund houses' monthly portfolios")
     s.add_argument("--state", default="state")
     s.add_argument("--dry-run", action="store_true", help="print findings, do not email or save state")
+    s.add_argument("--resend-last", action="store_true", help="email the most recent alert again")
     s.add_argument("--only", help="comma-separated fund houses, e.g. dsp,ppfas")
     a = ap.parse_args(argv)
     {"test-email": cmd_test_email, "mfwatch": cmd_mfwatch}[a.cmd](a)
