@@ -4,9 +4,8 @@ name: Fund house small cap buys
 # This checks each day from the 1st to the 15th, reads any newly published month,
 # and emails the small cap stocks a fund house holds now but held in no scheme last month.
 on:
-  # Schedule switched off 2026-11-10 at the user's request. Can still be run by hand.
-  # schedule:
-  #  - cron: "30 13 1-15 * *"   # 19:00 IST, 1st to 15th of each month
+  schedule:
+    - cron: "30 13 1-15 * *"   # 19:00 IST, 1st to 15th of each month
   workflow_dispatch:
     inputs:
       dry_run:
