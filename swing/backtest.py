@@ -23,8 +23,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-TRAIN_END = pd.Timestamp("2024-12-31")
+TRAIN_END = pd.Timestamp("2024-12-31")   # overridden by --train-end
 TEST_START = pd.Timestamp("2025-01-01")
+MIN_MCAP = 5_000e7  # Rs 5,000 crore
 CAPITAL = 500_000.0
 SLIPPAGE = 0.001  # 0.10% per side, on every fill
 
@@ -48,9 +49,16 @@ def load(data_dir: Path) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
     for f in sorted((data_dir / "eq").glob("*.csv")):
         d = pd.read_csv(f, parse_dates=["date"]).drop_duplicates("date").sort_values("date")
         d = d.set_index("date")[["open", "high", "low", "close", "volume"]].astype(float)
+        # bad ticks: keep high/low within 20% of the day's open/close (NSE circuit range)
+        d["high"] = d.high.clip(upper=d[["open", "close"]].max(axis=1) * 1.2)
+        d["low"] = d.low.clip(lower=d[["open", "close"]].min(axis=1) * 0.8)
         if len(d) < 260:
             continue
         stocks[f.stem] = d
+    uni = data_dir / "universe.csv"
+    if uni.exists():  # price x today's shares = estimated market cap on each day
+        sh = pd.read_csv(uni).dropna(subset=["shares"]).set_index("symbol").shares
+        stocks = {s: d.assign(mcap=d.close * sh[s]) for s, d in stocks.items() if s in sh.index}
     nifty = pd.read_csv(data_dir / "nifty.csv", parse_dates=["date"]).set_index("date").sort_index()
     return stocks, nifty
 
@@ -80,6 +88,7 @@ def features(d: pd.DataFrame) -> pd.DataFrame:
     f["ret126"] = c / c.shift(126) - 1
     f["down3"] = (c.diff() < 0).astype(int).rolling(3).sum() == 3
     f["turnover"] = (c * d.volume).rolling(20).mean()
+    f["mcap_ok"] = d.mcap > MIN_MCAP if "mcap" in d else True
     # demerger / bad-print gaps: never hold across them
     gap = d.open / c.shift() - 1
     f["bad_gap"] = (gap < -0.3) | (gap > 0.4)
@@ -99,6 +108,7 @@ class Rule:
     @property
     def name(self) -> str:
         stop = f"stop {self.stop:.0%}" if self.stop else "no stop"
+        stop += f" | max {self.max_days} days"
         mkt = {"none": "any market", "nifty50": "NIFTY > 50-day avg", "nifty200": "NIFTY > 200-day avg"}[self.market]
         return f"{SETUPS[self.setup][0].format(p=self.param)} | {mkt} | {stop}"
 
@@ -139,21 +149,23 @@ def trade_outcome(o, h, l, c, bad, i, rule: Rule):
     tgt = entry * (1 + rule.target)
     stp = entry * (1 - rule.stop) if rule.stop else -np.inf
     last = min(i + rule.max_days - 1, n - 1)
+    low = entry  # worst price seen while holding
     for j in range(i, last + 1):
-        if j > i and bad[j]:
-            return None
+        if j > i and bad[j]:  # demerger / bad print: sell at the previous close
+            return j - 1, c[j - 1], "gap", low / entry - 1
         if j > i:  # gaps through levels fill at the open
             if o[j] <= stp:
-                return j, o[j], "stop"
+                return j, o[j], "stop", min(low, o[j]) / entry - 1
             if o[j] >= tgt:
-                return j, o[j], "target"
+                return j, o[j], "target", low / entry - 1
         if l[j] <= stp:
-            return j, stp, "stop"
+            return j, stp, "stop", stp / entry - 1
         if h[j] >= tgt:
-            return j, tgt, "target"
-    if last < i + rule.max_days - 1:
-        return None  # data ends before trade is done
-    return last, c[last], "time"
+            return j, tgt, "target", low / entry - 1
+        low = min(low, l[j])
+    if last < i + rule.max_days - 1:  # still open when the data ends: value at last close
+        return last, c[last], "open", low / entry - 1
+    return last, c[last], "time", low / entry - 1
 
 
 def build_panel(stocks, nifty):
@@ -176,7 +188,7 @@ def signals(feats, mkt, stocks, rule: Rule) -> pd.DataFrame:
     for s, f in feats.items():
         d = stocks[s]
         sig = cond(f, rule.param) & mkt[rule.market].reindex(f.index).fillna(False).astype(bool)
-        sig &= f.turnover > 5e7  # at least Rs 5 cr traded a day
+        sig &= (f.turnover > 5e7) & f.mcap_ok  # Rs 5 cr traded a day, mcap > Rs 5,000 cr
         idx = np.flatnonzero(sig.to_numpy())
         if not len(idx):
             continue
@@ -190,10 +202,10 @@ def signals(feats, mkt, stocks, rule: Rule) -> pd.DataFrame:
             out = trade_outcome(o, h, l, c, bad, i, rule)
             if out is None:
                 continue
-            j, px, why = out
-            rows.append((s, f.index[k], f.index[i], f.index[j], o[i], px, why, j - i + 1, sc[k]))
+            j, px, why, mae = out
+            rows.append((s, f.index[k], f.index[i], f.index[j], o[i], px, why, j - i + 1, mae, sc[k]))
     t = pd.DataFrame(rows, columns=["symbol", "signal_date", "entry_date", "exit_date", "entry", "exit",
-                                    "reason", "days", "score"])
+                                    "reason", "days", "mae", "score"])
     return t
 
 
@@ -204,6 +216,7 @@ def portfolio(cands: pd.DataFrame, stocks, dates, slots: int, start, end):
     cash = CAPITAL
     open_pos = []  # dicts
     trades, equity = [], []
+    last_day = max(d for d in dates if d <= end)
     closes = {s: d.close for s, d in stocks.items()}
     held = set()
     for d in dates:
@@ -220,16 +233,20 @@ def portfolio(cands: pd.DataFrame, stocks, dates, slots: int, start, end):
                 alloc = min(cash, eq_now / slots)
                 buy_px = t.entry * (1 + SLIPPAGE)
                 qty = int(alloc // buy_px)
-                if qty <= 0:
+                if qty <= 0 or alloc < 10_000:
                     continue
                 cash -= qty * buy_px
                 open_pos.append(dict(symbol=t.symbol, qty=qty, entry=t.entry, buy_px=buy_px,
                                      exit_date=t.exit_date, exit=t.exit, reason=t.reason,
-                                     entry_date=d, days=t.days, signal_date=t.signal_date))
+                                     entry_date=d, days=t.days, mae=t.mae, signal_date=t.signal_date))
                 held.add(t.symbol)
         still = []
         for p in open_pos:
-            if p["exit_date"] == d:
+            if p["exit_date"] == d or d == last_day:  # anything still held is valued at the end
+                if p["exit_date"] != d:
+                    p["exit"], p["reason"] = closes[p["symbol"]].get(d, p["entry"]), "open"
+                    p["days"] = int(((closes[p["symbol"]].index >= p["entry_date"]) &
+                                     (closes[p["symbol"]].index <= d)).sum())
                 sell_px = p["exit"] * (1 - SLIPPAGE)
                 bv, sv = p["qty"] * p["buy_px"], p["qty"] * sell_px
                 cost = round_trip_cost(bv, sv)
@@ -238,7 +255,8 @@ def portfolio(cands: pd.DataFrame, stocks, dates, slots: int, start, end):
                 held.discard(p["symbol"])
                 trades.append(dict(symbol=p["symbol"], signal_date=p["signal_date"], entry_date=p["entry_date"],
                                    exit_date=d, entry=round(p["entry"], 2), exit=round(p["exit"], 2),
-                                   qty=p["qty"], reason=p["reason"], days=p["days"], invested=round(bv),
+                                   qty=p["qty"], reason=p["reason"], days=p["days"], mae=round(p["mae"], 4),
+                                   invested=round(bv),
                                    pnl=round(pnl), ret=pnl / bv))
             else:
                 still.append(p)
@@ -261,6 +279,8 @@ def stats(trades: pd.DataFrame, eq: pd.DataFrame) -> dict:
         trades=int(len(trades)),
         win_rate=float(len(wins) / len(trades)),
         target_hit=float((trades.reason == "target").mean()),
+        open_at_end=int((trades.reason == "open").sum()),
+        open_avg_ret=float(trades[trades.reason == "open"].ret.mean()) if (trades.reason == "open").any() else 0.0,
         avg_ret=float(trades.ret.mean()),
         avg_win=float(wins.ret.mean()) if len(wins) else 0.0,
         avg_loss=float(loss.ret.mean()) if len(loss) else 0.0,
@@ -270,6 +290,13 @@ def stats(trades: pd.DataFrame, eq: pd.DataFrame) -> dict:
         cagr=float((1 + total) ** (1 / years) - 1) if years > 0 else 0.0,
         max_dd=float(dd),
         avg_positions=float(eq.positions.mean()),
+        full_time=float((eq.positions >= eq.positions.max()).mean()),
+        median_days=float(trades.days.median()),
+        over15=float((trades.days > 15).mean()),
+        over60=float((trades.days > 60).mean()),
+        avg_mae=float(trades.mae.mean()),
+        worst_mae=float(trades.mae.min()),
+        mae_over10=float((trades.mae < -0.10).mean()),
         pnl=float(trades.pnl.sum()),
     )
 
@@ -285,21 +312,30 @@ def nifty_bh(nifty, start, end):
 
 # ---------------------------------------------------------------- main
 def main():
+    global TRAIN_END, TEST_START
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", type=Path, required=True)
     ap.add_argument("--out", type=Path, default=Path("swing/results"))
     ap.add_argument("--slots", type=int, default=5)
+    ap.add_argument("--train-end", default=str(TRAIN_END.date()))
+    ap.add_argument("--start", default=None)
+    ap.add_argument("--max-days", type=int, default=15)
+    ap.add_argument("--stops", default="0,0.03,0.05,0.08")
     a = ap.parse_args()
+    TRAIN_END = pd.Timestamp(a.train_end)
+    TEST_START = TRAIN_END + pd.Timedelta(days=1)
     a.out.mkdir(parents=True, exist_ok=True)
 
     stocks, nifty = load(a.data)
     feats, mkt = build_panel(stocks, nifty)
     dates = list(mkt.index)
-    first = dates[200]  # need 200 days of history for the averages
+    first = max(dates[200], pd.Timestamp(a.start)) if a.start else dates[200]
     last = min(max(d.index[-1] for d in stocks.values()), nifty.index[-1])
     print(f"{len(stocks)} stocks, {first.date()} .. {last.date()}")
 
-    rules = [Rule(s, p, m, st) for s in GRID for p, m, st in itertools.product(GRID[s], MARKETS, STOPS)]
+    stops = [float(x) for x in a.stops.split(",")]
+    rules = [Rule(s, p, m, st, max_days=a.max_days)
+             for s in GRID for p, m, st in itertools.product(GRID[s], MARKETS, stops)]
     grid_rows, cache = [], {}
     for r in rules:
         c = signals(feats, mkt, stocks, r)
@@ -317,7 +353,7 @@ def main():
     ok = grid[(grid.train_trades >= 80)].copy()
     ok["train_score"] = ok.train_cagr / ok.train_max_dd.abs().clip(lower=0.05)
     best = ok.sort_values("train_score", ascending=False).iloc[0]
-    rule = Rule(best.setup, best.param, best.market, best.stop)
+    rule = Rule(best.setup, best.param, best.market, best.stop, max_days=a.max_days)
     print("chosen on train:", rule.name)
 
     c = cache[rule]

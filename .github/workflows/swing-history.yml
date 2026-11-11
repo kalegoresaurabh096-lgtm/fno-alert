@@ -1,12 +1,9 @@
 name: Swing backtest - download price history
 
-# One-off research job: saves 2008+ daily prices for the top 800 companies to the
+# Manual research job: saves 2008+ daily prices for the top 800 companies to the
 # `swing-data` branch. Not scheduled. Does not touch the fund buys alert.
 on:
   workflow_dispatch:
-  push:
-    branches: [claude/project-thread-7izi7k]
-    paths: [swing/fetch_history.py, .github/workflows/swing-history.yml]
 
 permissions:
   contents: write
