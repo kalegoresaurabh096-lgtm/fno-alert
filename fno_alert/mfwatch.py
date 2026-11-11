@@ -517,3 +517,22 @@ def run(state: str = "state", dry_run: bool = False, only: list[str] | None = No
     elif not new.empty:
         print(render_email(new, month_label, read, failed)[1])
     return summary
+
+
+def resend_last(state: str = "state", dry_run: bool = False) -> str:
+    """Email the most recent alert again, rebuilt from alerts_log.csv."""
+    log = Path(state) / "mfwatch" / "alerts_log.csv"
+    if not log.exists():
+        return "No alert has been sent yet"
+    d = pd.read_csv(log, dtype={"isin": str})
+    last = d["found_on"].max()
+    new = d[d["found_on"] == last].drop(columns=["found_on"])
+    month_label = ", ".join(pd.Period(m, "M").strftime("%b %Y") for m in sorted(new["month"].unique()))
+    s, t, h = render_email(new, month_label, sorted(new["amc"].unique()), [])
+    s = f"[Resent] {s}"
+    if dry_run:
+        print(t)
+        return f"Would resend the alert found on {last}: {s}"
+    from . import emailer
+    emailer.send(s, t, h)
+    return f"Resent the alert found on {last}: {s}"

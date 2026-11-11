@@ -12,6 +12,10 @@ on:
         description: "Print the findings instead of emailing and saving them"
         type: boolean
         default: false
+      resend_last:
+        description: "Email the most recent alert again instead of checking for new portfolios"
+        type: boolean
+        default: false
 
 concurrency:
   group: mfwatch
@@ -30,15 +34,25 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements.txt && python -m playwright install --with-deps chromium
+      - run: pip install -r requirements.txt
+      - name: Resend the most recent alert
+        if: inputs.resend_last
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          ALERT_TO: ${{ secrets.ALERT_TO }}
+        run: python -m fno_alert mfwatch --resend-last ${{ inputs.dry_run && '--dry-run' || '' }}
+      - if: ${{ !inputs.resend_last }}
+        run: python -m playwright install --with-deps chromium
       - name: Read new portfolios and email new small cap positions
+        if: ${{ !inputs.resend_last }}
         env:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           ALERT_TO: ${{ secrets.ALERT_TO }}
         run: python -m fno_alert mfwatch ${{ inputs.dry_run && '--dry-run' || '' }}
       - name: Save state back to the repo
-        if: always() && !inputs.dry_run
+        if: always() && !inputs.dry_run && !inputs.resend_last
         run: |
           git config user.name "fno-alert-bot"
           git config user.email "fno-alert-bot@users.noreply.github.com"
